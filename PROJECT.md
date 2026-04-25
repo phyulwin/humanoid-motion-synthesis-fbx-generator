@@ -25,14 +25,7 @@ npm run dev
 ```
 Then open `http://localhost:3000`.
 
-Yes. You are supposed to run both `backend` and `frontend` at the same time.
-
-The `backend` by itself is just the API service, so in the browser you would only see backend endpoints like:
-- `http://localhost:8000/api/health`
-- `http://localhost:8000/api/jobs/...`
-
-The actual interface is on the `frontend`, usually:
-- `http://localhost:3000`
+Run both `backend` and `frontend` at the same time.
 
 ### Expected workflow:
 
