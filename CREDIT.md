@@ -30,7 +30,8 @@ This project uses third-party frameworks, libraries, and developer tools listed 
 
 ## Media (Videos, Images) Used
 
-(Pexels)[https://www.pexels.com/license/]
-- (MART PRODUCTION - Man Doing Ballet Dance)[https://www.pexels.com/video/man-doing-ballet-dance-8462512/]
-- (olia danilevich - Woman Dancing Freestyle)[https://www.pexels.com/video/woman-dancing-freestyle-4754080/]
-- (MART PRODUCTION - Energetic Man Dancing)[https://www.pexels.com/video/energetic-man-dancing-7480858/]
+### [Pexels Free License](https://www.pexels.com/license/)
+
+- [MART PRODUCTION - Man Doing Ballet Dance](https://www.pexels.com/video/man-doing-ballet-dance-8462512/)
+- [olia danilevich - Woman Dancing Freestyle](https://www.pexels.com/video/woman-dancing-freestyle-4754080/)
+- [MART PRODUCTION - Energetic Man Dancing](https://www.pexels.com/video/energetic-man-dancing-7480858/)
