@@ -78,14 +78,6 @@ Kinetix Studio is a hackathon MVP that turns a short dance video into a reviewab
 - Blender: install from `https://www.blender.org/download/`
 - FFmpeg: install from `https://ffmpeg.org/download.html`
 
-## Mixamo Rig Preparation
-
-1. Visit `https://www.mixamo.com/`.
-2. Download a standard humanoid character in T-pose.
-3. Import that FBX into Blender.
-4. Save the Blender scene as `backend/assets/mixamo_template.blend`.
-5. Keep the armature in the scene and do not rename the default Mixamo bones unless you also update `BLENDER_BONE_PREFIX`.
-
 ## Optional Auth0 Setup
 
 1. Visit the Auth0 dashboard at `https://manage.auth0.com/`.
