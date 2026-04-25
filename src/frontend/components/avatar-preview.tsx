@@ -320,7 +320,7 @@ function AnimatedAvatar({
   avatarVariant: string;
 }) {
   // This component loads the FBX avatar, binds motion data to bones, and renders the rig.
-  const sourceFbx = useFBX("/maximo_model.fbx");
+  const sourceFbx = useFBX("/mixamo_model.fbx");
   const clonedScene = useMemo(() => clone(sourceFbx), [sourceFbx]);
   const groupRef = useRef<THREE.Group>(null);
   const helperRef = useRef<THREE.SkeletonHelper | null>(null);

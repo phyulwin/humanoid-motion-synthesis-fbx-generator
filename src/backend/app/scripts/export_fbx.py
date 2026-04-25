@@ -57,6 +57,25 @@ def get_bone(armature, prefix: str, name: str):
     return armature.pose.bones.get(f"{prefix}{name}") or armature.pose.bones.get(name)
 
 
+def find_bound_meshes(armature) -> list:
+    # This function returns mesh objects that are skinned to the target armature for FBX export.
+    bound_meshes = []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+
+        if obj.parent == armature:
+            bound_meshes.append(obj)
+            continue
+
+        for modifier in obj.modifiers:
+            if modifier.type == "ARMATURE" and modifier.object == armature:
+                bound_meshes.append(obj)
+                break
+
+    return bound_meshes
+
+
 def main() -> None:
     # This function orchestrates the Blender-side import, keyframe creation, and FBX export.
     motion_path, output_path, frame_rate, bone_prefix = parse_args()
@@ -70,6 +89,9 @@ def main() -> None:
     bpy.context.scene.frame_end = len(preview_frames)
 
     armature = find_armature()
+    if armature.animation_data is None:
+        armature.animation_data_create()
+    armature.animation_data.action = bpy.data.actions.new(name="GeneratedMotion")
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode="POSE")
 
@@ -147,6 +169,8 @@ def main() -> None:
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.object.select_all(action="DESELECT")
     armature.select_set(True)
+    for mesh_object in find_bound_meshes(armature):
+        mesh_object.select_set(True)
     bpy.context.view_layer.objects.active = armature
 
     bpy.ops.export_scene.fbx(
@@ -155,6 +179,8 @@ def main() -> None:
         add_leaf_bones=False,
         bake_anim=True,
         bake_anim_use_all_bones=True,
+        bake_anim_use_nla_strips=False,
+        bake_anim_use_all_actions=False,
         bake_space_transform=True,
     )
 

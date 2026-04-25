@@ -73,7 +73,7 @@ class ExportService:
                 str(job.settings.frame_rate or self.settings.default_export_fps),
                 self.settings.blender_bone_prefix,
             ]
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            subprocess.run(command, check=True, capture_output=True)
 
             self.store.update_job(
                 job_id,
