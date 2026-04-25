@@ -13,3 +13,4 @@ backend/storage/jobs/*
 !backend/storage/uploads/.gitkeep
 !backend/storage/exports/.gitkeep
 !backend/storage/jobs/.gitkeep
+*.env

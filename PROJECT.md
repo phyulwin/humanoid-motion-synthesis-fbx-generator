@@ -1,1 +1,144 @@
 # Project Setup
+
+Setup first: install `Node.js 20+`, `Python 3.11`, `Blender`, and `FFmpeg`; create `frontend/.env.local` from `.env.local.example` and `backend/.env` from `.env.example`; if using sponsor tooling, set up `Auth0` app credentials in `frontend/.env.local`, put a Mixamo rig file at `backend/assets/mixamo_template.blend`, and optionally install `mediapipe` for real pose extraction instead of fallback preview.
+
+## Setup .env files
+```
+Update incoming 
+```
+
+Backend commands:
+```powershell
+cd src\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+To deactivate: ```deactivate```
+
+Frontend commands:
+```powershell
+cd src\frontend
+npm install
+npm run dev
+```
+Then open `http://localhost:3000`.
+
+Yes. You are supposed to run both `backend` and `frontend` at the same time.
+
+The `backend` by itself is just the API service, so in the browser you would only see backend endpoints like:
+- `http://localhost:8000/api/health`
+- `http://localhost:8000/api/jobs/...`
+
+The actual interface is on the `frontend`, usually:
+- `http://localhost:3000`
+
+### Expected workflow:
+
+- run backend on `:8000`
+- run frontend on `:3000`
+- open the frontend in browser
+- upload a video there
+- frontend sends the file to backend
+- backend processes it
+- frontend updates to show progress, preview state, and export actions
+
+# File: kinetix-studio/README.md
+# This file documents the project layout, setup steps, required environment variables, and external service onboarding.
+
+# Kinetix Studio
+
+Kinetix Studio is a hackathon MVP that turns a short dance video into a reviewable humanoid motion preview and prepares it for FBX export through Blender.
+
+## Stack
+
+- Frontend: Next.js, React, TypeScript, Tailwind CSS, React Three Fiber
+- Backend: FastAPI, Python, OpenCV, optional MediaPipe
+- Export: Blender headless script with a Mixamo-compatible rig template
+- Auth: Optional Auth0 login shell for sponsor alignment
+
+## Folder Layout
+
+- `frontend/`: judge-facing web dashboard
+- `backend/`: API, job pipeline, preview data generation, and FBX export service
+- `backend/storage/`: uploads, job metadata, preview assets, and exports
+
+## Backend Setup
+
+1. Install Python 3.11.
+2. Copy `backend/.env.example` to `backend/.env`.
+3. Create and activate a virtual environment.
+4. Install dependencies with `pip install -r requirements.txt`.
+5. Optional: install `mediapipe` separately on a supported Python version if you want live pose extraction instead of the synthetic fallback preview.
+6. Start the API with `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`.
+
+## Frontend Setup
+
+1. Install Node.js 20 LTS or newer.
+2. Copy `frontend/.env.local.example` to `frontend/.env.local`.
+3. Install dependencies with `npm install`.
+4. Start the app with `npm run dev`.
+
+## Required Local Tools
+
+- Blender: install from `https://www.blender.org/download/`
+- FFmpeg: install from `https://ffmpeg.org/download.html`
+
+## Mixamo Rig Preparation
+
+1. Visit `https://www.mixamo.com/`.
+2. Download a standard humanoid character in T-pose.
+3. Import that FBX into Blender.
+4. Save the Blender scene as `backend/assets/mixamo_template.blend`.
+5. Keep the armature in the scene and do not rename the default Mixamo bones unless you also update `BLENDER_BONE_PREFIX`.
+
+## Optional Auth0 Setup
+
+1. Visit the Auth0 dashboard at `https://manage.auth0.com/`.
+2. Create a `Regular Web Application`.
+3. Add `http://localhost:3000/auth/callback` to `Allowed Callback URLs`.
+4. Add `http://localhost:3000` to `Allowed Logout URLs`.
+5. Copy the `Domain`, `Client ID`, and `Client Secret` into `frontend/.env.local`.
+
+Auth0 references:
+
+- [Create Applications](https://auth0.com/docs/get-started/create-apps)
+- [Next.js Quickstart](https://auth0.com/docs/quickstart/webapp/nextjs/interactive)
+
+## Environment Files
+
+### `backend/.env`
+
+```env
+APP_NAME=Kinetix Studio API
+APP_ENV=development
+APP_HOST=0.0.0.0
+APP_PORT=8000
+CORS_ORIGINS=http://localhost:3000
+STORAGE_ROOT=storage
+FFMPEG_EXECUTABLE=ffmpeg
+BLENDER_EXECUTABLE=
+BLENDER_TEMPLATE_BLEND=assets/mixamo_template.blend
+BLENDER_BONE_PREFIX=mixamorig:
+DEFAULT_EXPORT_FPS=30
+```
+
+### `frontend/.env.local`
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+AUTH0_SECRET=
+APP_BASE_URL=http://localhost:3000
+AUTH0_DOMAIN=
+AUTH0_CLIENT_ID=
+AUTH0_CLIENT_SECRET=
+AUTH0_AUDIENCE=
+AUTH0_SCOPE=openid profile email
+```
+
+## Execution Notes
+
+- If OpenCV or MediaPipe is unavailable, the backend automatically falls back to a synthetic dance preview so the UI still functions.
+- Real FBX export requires Blender plus `backend/assets/mixamo_template.blend`.
+- The export script expects a Mixamo-style armature with the default prefix `mixamorig:`.

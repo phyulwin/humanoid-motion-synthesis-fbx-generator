@@ -1,45 +1,15 @@
-// File: kinetix-studio/frontend/lib/types.ts
-// This file defines the frontend TypeScript models shared across components.
+// File: frontend/middleware.ts
+// This file provides a minimal valid Next.js middleware export.
 
-export type JointPoint = {
-  x: number;
-  y: number;
-  z: number;
-};
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-export type PreviewFrame = {
-  t: number;
-  joints: Record<string, JointPoint>;
-};
+// This function lets requests continue without blocking the app.
+export function middleware(_request: NextRequest) {
+  return NextResponse.next();
+}
 
-export type JobSettings = {
-  avatar_rig: string;
-  frame_rate: number;
-  trim_start: number;
-  trim_end: number;
-  loop_animation: boolean;
-};
-
-export type JobRecord = {
-  id: string;
-  filename: string;
-  stage: "upload" | "process" | "review" | "export";
-  status: "queued" | "processing" | "ready" | "exporting" | "completed" | "failed";
-  progress: number;
-  message: string;
-  settings: JobSettings;
-  created_at: string;
-  updated_at: string;
-  upload_url: string | null;
-  thumbnail_url: string | null;
-  export_url: string | null;
-  preview_frames: PreviewFrame[];
-  waveform: number[];
-  error: string | null;
-};
-
-export type DashboardUser = {
-  name: string;
-  email?: string;
-  picture?: string;
+// This config tells Next.js which routes should pass through middleware.
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"]
 };
