@@ -25,6 +25,7 @@ type UploadSettings = {
 const NAV_ITEMS = ["Studio", "Animations", "Avatars", "Templates", "Exports", "Settings"];
 const ENVIRONMENT_PRESETS = ["Neon Stage", "Midnight Hall", "Warm Desert", "Studio Black"];
 const LIGHTING_PRESETS = ["Halo", "Cinema", "Aurora", "Sunset"];
+const AVATAR_VARIANTS = ["Studio Dancer", "Chrome Echo", "Amber Guard"];
 
 export default function StudioDashboard({ user, authEnabled }: StudioDashboardProps) {
   // This client component manages upload state, polling, export actions, and all dashboard controls.
@@ -35,6 +36,7 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
   const [error, setError] = useState<string | null>(null);
   const [environmentPreset, setEnvironmentPreset] = useState(ENVIRONMENT_PRESETS[0]);
   const [lightingPreset, setLightingPreset] = useState(LIGHTING_PRESETS[0]);
+  const [avatarVariant, setAvatarVariant] = useState(AVATAR_VARIANTS[0]);
   const [settings, setSettings] = useState<UploadSettings>({
     avatarRig: "Mixamo Standard",
     frameRate: 30,
@@ -149,6 +151,15 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
   const thumbnailUrl = resolveFileUrl(job?.thumbnail_url || null);
   const uploadPreviewUrl = localVideoUrl || thumbnailUrl;
   const exportUrl = resolveFileUrl(job?.export_url || null);
+
+  function handleChangeAvatar() {
+    // This handler rotates through the available in-browser avatar variants for the live preview.
+    setAvatarVariant((current) => {
+      const currentIndex = AVATAR_VARIANTS.indexOf(current);
+      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % AVATAR_VARIANTS.length : 0;
+      return AVATAR_VARIANTS[nextIndex];
+    });
+  }
 
   return (
     <main className="min-h-screen p-4 md:p-6">
@@ -295,8 +306,8 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
                       }
                     >
                       <option>Mixamo Standard</option>
-                      <option>Unity Humanoid</option>
-                      <option>VRM Humanoid</option>
+                      <option>Unity Humanoid (Coming Soon)</option>
+                      <option>VRM Humanoid (Coming Soon)</option>
                     </select>
                   </label>
                   <div>
@@ -386,7 +397,10 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
                 </div>
               </div>
               <AvatarPreview
+                avatarVariant={avatarVariant}
+                environmentPreset={environmentPreset}
                 frames={job?.preview_frames || []}
+                lightingPreset={lightingPreset}
                 loopAnimation={settings.loopAnimation}
                 waveform={job?.waveform || []}
               />
@@ -419,11 +433,21 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
               <section className="glass-panel rounded-[28px] p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <div className="text-xs uppercase tracking-[0.28em] text-white/55">3. Preview Avatar</div>
-                  <div className="text-xs text-accent">Change Avatar</div>
+                  <button className="text-xs text-accent" type="button" onClick={handleChangeAvatar}>
+                    Change Avatar
+                  </button>
                 </div>
                 <div className="rounded-[24px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(255,148,99,0.18),transparent_48%),linear-gradient(180deg,rgba(11,14,26,1),rgba(10,12,22,1))] p-5">
-                  <div className="flex h-[220px] items-center justify-center rounded-[22px] border border-white/10 bg-black/20 text-center text-sm text-white/55">
-                    Procedural humanoid preview
+                  <div className="flex h-[220px] flex-col justify-between rounded-[22px] border border-white/10 bg-black/20 p-5 text-sm text-white/55">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.24em] text-white/45">Active Avatar</div>
+                      <div className="mt-2 text-xl font-semibold text-white">{avatarVariant}</div>
+                    </div>
+                    <div className="space-y-2 text-xs text-white/60">
+                      <div>Environment: {environmentPreset}</div>
+                      <div>Lighting: {lightingPreset}</div>
+                      <div>Rig: {settings.avatarRig}</div>
+                    </div>
                   </div>
                   <div className="mt-4">
                     <div className="mb-2 text-xs text-white/50">Environment</div>

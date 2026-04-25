@@ -15,6 +15,9 @@ type AvatarPreviewProps = {
   frames: PreviewFrame[];
   waveform: number[];
   loopAnimation: boolean;
+  environmentPreset: string;
+  lightingPreset: string;
+  avatarVariant: string;
 };
 
 type BoneMap = {
@@ -43,6 +46,138 @@ type BonePoseMap = {
   leftLegQuaternion?: THREE.Quaternion;
   rightUpLegQuaternion?: THREE.Quaternion;
   rightLegQuaternion?: THREE.Quaternion;
+};
+
+type EnvironmentStyle = {
+  backgroundClassName: string;
+  floorColor: string;
+  floorOpacity: number;
+  sparkleColor: string;
+  sparkleCount: number;
+};
+
+type LightingStyle = {
+  ambientIntensity: number;
+  keyLightColor: string;
+  keyLightIntensity: number;
+  fillLightColor: string;
+  fillLightIntensity: number;
+  pointLightColor: string;
+  pointLightIntensity: number;
+};
+
+type AvatarStyle = {
+  scale: number;
+  positionY: number;
+  skinColor: string;
+  emissiveColor: string;
+  emissiveIntensity: number;
+  metalness: number;
+  roughness: number;
+};
+
+const ENVIRONMENT_STYLES: Record<string, EnvironmentStyle> = {
+  "Neon Stage": {
+    backgroundClassName:
+      "bg-[radial-gradient(circle_at_top,rgba(99,190,255,0.2),transparent_42%),linear-gradient(180deg,rgba(5,10,26,0.95),rgba(9,16,36,0.96))]",
+    floorColor: "#7df9ff",
+    floorOpacity: 0.32,
+    sparkleColor: "#7df9ff",
+    sparkleCount: 34,
+  },
+  "Midnight Hall": {
+    backgroundClassName:
+      "bg-[radial-gradient(circle_at_top,rgba(160,174,255,0.12),transparent_40%),linear-gradient(180deg,rgba(8,9,19,0.94),rgba(14,16,30,0.98))]",
+    floorColor: "#a4b0ff",
+    floorOpacity: 0.24,
+    sparkleColor: "#c2c8ff",
+    sparkleCount: 16,
+  },
+  "Warm Desert": {
+    backgroundClassName:
+      "bg-[radial-gradient(circle_at_top,rgba(255,184,107,0.18),transparent_42%),linear-gradient(180deg,rgba(28,14,8,0.92),rgba(42,21,10,0.98))]",
+    floorColor: "#ffb86b",
+    floorOpacity: 0.3,
+    sparkleColor: "#ffd39b",
+    sparkleCount: 20,
+  },
+  "Studio Black": {
+    backgroundClassName:
+      "bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_36%),linear-gradient(180deg,rgba(7,8,12,0.96),rgba(8,8,10,1))]",
+    floorColor: "#d8ff28",
+    floorOpacity: 0.22,
+    sparkleColor: "#ff9463",
+    sparkleCount: 10,
+  },
+};
+
+const LIGHTING_STYLES: Record<string, LightingStyle> = {
+  Halo: {
+    ambientIntensity: 0.95,
+    keyLightColor: "#fff3bf",
+    keyLightIntensity: 1.9,
+    fillLightColor: "#6ef2ff",
+    fillLightIntensity: 1.1,
+    pointLightColor: "#ff9463",
+    pointLightIntensity: 8,
+  },
+  Cinema: {
+    ambientIntensity: 0.45,
+    keyLightColor: "#ffe0b3",
+    keyLightIntensity: 2.35,
+    fillLightColor: "#6b87ff",
+    fillLightIntensity: 0.7,
+    pointLightColor: "#ff7a45",
+    pointLightIntensity: 5.4,
+  },
+  Aurora: {
+    ambientIntensity: 0.72,
+    keyLightColor: "#8ef7ff",
+    keyLightIntensity: 1.7,
+    fillLightColor: "#9d7dff",
+    fillLightIntensity: 1.3,
+    pointLightColor: "#67ffb3",
+    pointLightIntensity: 6.2,
+  },
+  Sunset: {
+    ambientIntensity: 0.68,
+    keyLightColor: "#ffcf8f",
+    keyLightIntensity: 2.05,
+    fillLightColor: "#ff7d6b",
+    fillLightIntensity: 0.85,
+    pointLightColor: "#ffb14a",
+    pointLightIntensity: 7,
+  },
+};
+
+const AVATAR_STYLES: Record<string, AvatarStyle> = {
+  "Studio Dancer": {
+    scale: 0.0235,
+    positionY: -2.0,
+    skinColor: "#f0b08d",
+    emissiveColor: "#5a2d1f",
+    emissiveIntensity: 0.04,
+    metalness: 0.08,
+    roughness: 0.9,
+  },
+  "Chrome Echo": {
+    scale: 0.023,
+    positionY: -2.02,
+    skinColor: "#cfd6e6",
+    emissiveColor: "#6ef2ff",
+    emissiveIntensity: 0.12,
+    metalness: 0.58,
+    roughness: 0.34,
+  },
+  "Amber Guard": {
+    scale: 0.024,
+    positionY: -1.98,
+    skinColor: "#d49762",
+    emissiveColor: "#ff9463",
+    emissiveIntensity: 0.1,
+    metalness: 0.2,
+    roughness: 0.72,
+  },
 };
 
 function toVector3(joint?: { x: number; y: number; z: number }): THREE.Vector3 {
@@ -139,16 +274,50 @@ function captureBonePoseMap(boneMap: BoneMap): BonePoseMap {
   };
 }
 
+function applyAvatarStyle(root: THREE.Object3D, avatarVariant: string) {
+  // This helper applies a working material preset so avatar selection changes the rendered character.
+  const avatarStyle = AVATAR_STYLES[avatarVariant] ?? AVATAR_STYLES["Studio Dancer"];
+
+  root.scale.setScalar(avatarStyle.scale);
+  root.position.set(0, avatarStyle.positionY, 0);
+  root.rotation.set(0, Math.PI, 0);
+
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) {
+      return;
+    }
+
+    const currentMaterial = child.material;
+    if (Array.isArray(currentMaterial)) {
+      return;
+    }
+
+    const nextMaterial =
+      currentMaterial instanceof THREE.MeshStandardMaterial
+        ? currentMaterial.clone()
+        : new THREE.MeshStandardMaterial();
+
+    nextMaterial.color = new THREE.Color(avatarStyle.skinColor);
+    nextMaterial.emissive = new THREE.Color(avatarStyle.emissiveColor);
+    nextMaterial.emissiveIntensity = avatarStyle.emissiveIntensity;
+    nextMaterial.metalness = avatarStyle.metalness;
+    nextMaterial.roughness = avatarStyle.roughness;
+    child.material = nextMaterial;
+  });
+}
+
 function AnimatedAvatar({
   frames,
   loopAnimation,
   showSkin,
   showSkeleton,
+  avatarVariant,
 }: {
   frames: PreviewFrame[];
   loopAnimation: boolean;
   showSkin: boolean;
   showSkeleton: boolean;
+  avatarVariant: string;
 }) {
   // This component loads the FBX avatar, binds motion data to bones, and renders the rig.
   const sourceFbx = useFBX("/maximo_model.fbx");
@@ -161,9 +330,7 @@ function AnimatedAvatar({
 
   useEffect(() => {
     // This effect prepares the avatar transform and caches resolved rig bones.
-    clonedScene.scale.setScalar(0.0235);
-    clonedScene.position.set(0, -2.0, 0);
-    clonedScene.rotation.set(0, Math.PI, 0);
+    applyAvatarStyle(clonedScene, avatarVariant);
     clonedScene.updateMatrixWorld(true);
     clonedScene.traverse((child) => {
       if (child instanceof THREE.SkinnedMesh) {
@@ -178,7 +345,7 @@ function AnimatedAvatar({
       helperRef.current.visible = showSkeleton;
       helperRef.current.scale.setScalar(0.0085);
     }
-  }, [clonedScene, showSkin, showSkeleton]);
+  }, [avatarVariant, clonedScene, showSkin, showSkeleton]);
 
   useEffect(() => {
     // This effect creates and cleans up the skeleton helper overlay.
@@ -317,10 +484,15 @@ export default function AvatarPreview({
   frames,
   waveform,
   loopAnimation,
+  environmentPreset,
+  lightingPreset,
+  avatarVariant,
 }: AvatarPreviewProps) {
   // This component assembles the canvas, preview controls, and animated timeline.
   const [showSkin, setShowSkin] = useState(true);
   const [showSkeleton, setShowSkeleton] = useState(false);
+  const environmentStyle = ENVIRONMENT_STYLES[environmentPreset] ?? ENVIRONMENT_STYLES["Neon Stage"];
+  const lightingStyle = LIGHTING_STYLES[lightingPreset] ?? LIGHTING_STYLES.Halo;
 
   const safeFrames =
     frames.length > 0
@@ -347,7 +519,7 @@ export default function AvatarPreview({
         ];
 
   return (
-    <div className="flex h-full flex-col rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(8,10,22,0.88),rgba(11,16,32,0.96))]">
+    <div className={`flex h-full flex-col rounded-[28px] border border-white/10 ${environmentStyle.backgroundClassName}`}>
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
         <div className="text-xs uppercase tracking-[0.22em] text-white/45">Avatar Preview Controls</div>
         <div className="flex gap-2">
@@ -375,14 +547,14 @@ export default function AvatarPreview({
       <div className="relative h-[420px] overflow-hidden rounded-[28px]">
         <Canvas>
           <PerspectiveCamera makeDefault position={[0, 1.4, 6.5]} fov={34} />
-          <ambientLight intensity={0.85} />
-          <directionalLight position={[4, 8, 5]} intensity={1.8} color="#fff3bf" />
-          <directionalLight position={[-6, 2, -4]} intensity={1.0} color="#6ef2ff" />
-          <pointLight position={[0, 3.5, 2]} intensity={8} color="#ff9463" />
+          <ambientLight intensity={lightingStyle.ambientIntensity} />
+          <directionalLight position={[4, 8, 5]} intensity={lightingStyle.keyLightIntensity} color={lightingStyle.keyLightColor} />
+          <directionalLight position={[-6, 2, -4]} intensity={lightingStyle.fillLightIntensity} color={lightingStyle.fillLightColor} />
+          <pointLight position={[0, 3.5, 2]} intensity={lightingStyle.pointLightIntensity} color={lightingStyle.pointLightColor} />
 
           <mesh position={[0, -1.72, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <ringGeometry args={[1.12, 1.42, 48]} />
-            <meshBasicMaterial color="#d8ff28" transparent opacity={0.35} />
+            <meshBasicMaterial color={environmentStyle.floorColor} transparent opacity={environmentStyle.floorOpacity} />
           </mesh>
 
           <AnimatedAvatar
@@ -390,9 +562,16 @@ export default function AvatarPreview({
             loopAnimation={loopAnimation}
             showSkin={showSkin}
             showSkeleton={showSkeleton}
+            avatarVariant={avatarVariant}
           />
 
-          <Sparkles count={28} scale={5.2} size={2.6} speed={0.35} color="#ff9463" />
+          <Sparkles
+            count={environmentStyle.sparkleCount}
+            scale={5.2}
+            size={2.6}
+            speed={0.35}
+            color={environmentStyle.sparkleColor}
+          />
           <OrbitControls enablePan={false} minDistance={4.8} maxDistance={8.5} />
         </Canvas>
       </div>
