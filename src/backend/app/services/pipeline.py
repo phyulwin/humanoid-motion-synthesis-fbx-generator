@@ -12,6 +12,7 @@ import numpy as np
 from app.config import Settings
 from app.models import JobRecord, JobStage, JobStatus, JointPoint, PreviewFrame
 from app.services.job_store import JsonJobStore
+from app.services.k2_client import K2ReasoningClient, MotionReasoningResult
 
 
 class MotionPipeline:
@@ -21,6 +22,7 @@ class MotionPipeline:
         self.settings = settings
         self.store = store
         self._threads: dict[str, threading.Thread] = {}
+        self.k2_client = K2ReasoningClient(settings)
 
     def start_processing(self, job_id: str) -> None:
         # This method launches the background worker for a queued job.
@@ -55,8 +57,10 @@ class MotionPipeline:
             self.store.update_job(
                 job_id,
                 progress=65,
-                message="Building review-ready motion preview.",
+                message="Running K2 reasoning and building review-ready motion preview.",
             )
+            reasoning_result = self._run_reasoning(preview_frames, job.settings.frame_rate)
+            preview_frames = self._apply_reasoning_cleanup(preview_frames, reasoning_result)
             waveform = self._build_waveform(preview_frames)
             motion_payload = {
                 "frame_rate": job.settings.frame_rate,
@@ -74,6 +78,9 @@ class MotionPipeline:
                 thumbnail_url=thumbnail_url,
                 preview_frames=preview_frames,
                 waveform=waveform,
+                reasoning_summary=reasoning_result.summary if reasoning_result else "K2 reasoning skipped.",
+                reasoning_actions=reasoning_result.actions if reasoning_result else [],
+                reasoning_model=self.settings.k2_model_name if reasoning_result else None,
             )
         except Exception as exc:
             self.store.update_job(
@@ -255,6 +262,88 @@ class MotionPipeline:
                 )
             )
         return preview_frames
+
+    def _run_reasoning(self, preview_frames: list[PreviewFrame], frame_rate: int) -> MotionReasoningResult | None:
+        # This helper asks K2 for cleanup policy and falls back quietly if the API is unavailable.
+        try:
+            return self.k2_client.analyze_motion(preview_frames, frame_rate)
+        except Exception:
+            return None
+
+    def _apply_reasoning_cleanup(
+        self,
+        preview_frames: list[PreviewFrame],
+        reasoning_result: MotionReasoningResult | None,
+    ) -> list[PreviewFrame]:
+        # This helper applies deterministic cleanup chosen by K2 so the reasoning model materially affects output.
+        if not preview_frames:
+            return preview_frames
+
+        arm_boost = reasoning_result.arm_boost if reasoning_result else 1.18
+        leg_boost = reasoning_result.leg_boost if reasoning_result else 1.08
+        hip_sway_boost = reasoning_result.hip_sway_boost if reasoning_result else 1.1
+        smoothing_window = reasoning_result.smoothing_window if reasoning_result else 3
+
+        enhanced_frames: list[PreviewFrame] = []
+        for frame in preview_frames:
+            updated_joints: dict[str, JointPoint] = {}
+            for joint_name, joint in frame.joints.items():
+                x_value = joint.x
+                y_value = joint.y
+                z_value = joint.z
+
+                if joint_name in {"left_hand", "right_hand", "left_elbow", "right_elbow"}:
+                    x_value *= arm_boost
+                    z_value *= arm_boost
+
+                if joint_name in {"left_foot", "right_foot", "left_knee", "right_knee"}:
+                    x_value *= leg_boost
+                    z_value *= leg_boost
+
+                if joint_name == "hips":
+                    x_value *= hip_sway_boost
+
+                updated_joints[joint_name] = JointPoint(
+                    x=round(x_value, 4),
+                    y=round(y_value, 4),
+                    z=round(z_value, 4),
+                )
+
+            enhanced_frames.append(PreviewFrame(t=frame.t, joints=updated_joints))
+
+        return self._smooth_frames(enhanced_frames, smoothing_window)
+
+    def _smooth_frames(self, preview_frames: list[PreviewFrame], window_size: int) -> list[PreviewFrame]:
+        # This helper applies moving-average smoothing to reduce jitter after amplitude corrections.
+        if window_size <= 1 or len(preview_frames) < 3:
+            return preview_frames
+
+        smoothed_frames: list[PreviewFrame] = []
+        total_frames = len(preview_frames)
+        for index, frame in enumerate(preview_frames):
+            start_index = max(0, index - (window_size // 2))
+            end_index = min(total_frames, index + (window_size // 2) + 1)
+            window = preview_frames[start_index:end_index]
+            smoothed_joints: dict[str, JointPoint] = {}
+
+            for joint_name in frame.joints:
+                x_total = 0.0
+                y_total = 0.0
+                z_total = 0.0
+                for item in window:
+                    joint = item.joints[joint_name]
+                    x_total += joint.x
+                    y_total += joint.y
+                    z_total += joint.z
+                divisor = float(len(window))
+                smoothed_joints[joint_name] = JointPoint(
+                    x=round(x_total / divisor, 4),
+                    y=round(y_total / divisor, 4),
+                    z=round(z_total / divisor, 4),
+                )
+
+            smoothed_frames.append(PreviewFrame(t=frame.t, joints=smoothed_joints))
+        return smoothed_frames
 
     def _build_waveform(self, preview_frames: list[PreviewFrame]) -> list[float]:
         # This helper derives a simple motion-energy waveform for the timeline display.

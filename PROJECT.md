@@ -1,5 +1,7 @@
 # Project Setup
 
+This file documents the project layout, setup steps, required environment variables, and external service onboarding.
+
 Setup first: install `Node.js 20+`, `Python 3.11`, `Blender`, and `FFmpeg`; create `frontend/.env.local` from `.env.local.example` and `backend/.env` from `.env.example`; if using sponsor tooling, set up `Auth0` app credentials in `frontend/.env.local`, put a Mixamo rig file at `backend/assets/mixamo_template.blend`, and optionally install `mediapipe` for real pose extraction instead of fallback preview.
 
 ## Setup .env files
@@ -37,8 +39,8 @@ Run both `backend` and `frontend` at the same time.
 - backend processes it
 - frontend updates to show progress, preview state, and export actions
 
-# File: kinetix-studio/README.md
-# This file documents the project layout, setup steps, required environment variables, and external service onboarding.
+
+
 
 # Kinetix Studio
 
@@ -91,36 +93,7 @@ Auth0 references:
 - [Create Applications](https://auth0.com/docs/get-started/create-apps)
 - [Next.js Quickstart](https://auth0.com/docs/quickstart/webapp/nextjs/interactive)
 
-## Environment Files
-
-### `backend/.env`
-
-```env
-APP_NAME=Kinetix Studio API
-APP_ENV=development
-APP_HOST=0.0.0.0
-APP_PORT=8000
-CORS_ORIGINS=http://localhost:3000
-STORAGE_ROOT=storage
-FFMPEG_EXECUTABLE=ffmpeg
-BLENDER_EXECUTABLE=
-BLENDER_TEMPLATE_BLEND=assets/mixamo_template.blend
-BLENDER_BONE_PREFIX=mixamorig:
-DEFAULT_EXPORT_FPS=30
-```
-
-### `frontend/.env.local`
-
-```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-AUTH0_SECRET=
-APP_BASE_URL=http://localhost:3000
-AUTH0_DOMAIN=
-AUTH0_CLIENT_ID=
-AUTH0_CLIENT_SECRET=
-AUTH0_AUDIENCE=
-AUTH0_SCOPE=openid profile email
-```
+Also set up Environment Files for both frontend and backend.
 
 ## Execution Notes
 

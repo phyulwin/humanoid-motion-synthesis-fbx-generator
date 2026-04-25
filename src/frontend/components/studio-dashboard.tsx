@@ -153,7 +153,7 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
   return (
     <main className="min-h-screen p-4 md:p-6">
       <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-[1540px] gap-4">
-        <aside className="glass-panel hidden w-[88px] flex-col rounded-[28px] p-4 lg:flex">
+        {/* <aside className="glass-panel hidden w-[88px] flex-col rounded-[28px] p-4 lg:flex">
           <div className="mb-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(216,255,40,0.18)] text-2xl font-black text-accent shadow-glow">
             K
           </div>
@@ -172,7 +172,7 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
               </div>
             ))}
           </div>
-        </aside>
+        </aside> */}
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <header className="glass-panel rounded-[28px] px-6 py-5">
@@ -194,7 +194,6 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
                     <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
                         {user.picture ? (
-                          // This image tag is acceptable here because the image source is provided directly by Auth0.
                           <img
                             alt={user.name}
                             className="h-10 w-10 rounded-full object-cover"
@@ -399,6 +398,19 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
               {job?.error ? (
                 <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {job.error}
+                </div>
+              ) : null}
+              {job?.reasoning_summary ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/80">
+                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-white/45">
+                    {job.reasoning_model || "Reasoning Layer"}
+                  </div>
+                  <div>{job.reasoning_summary}</div>
+                  {job.reasoning_actions.length ? (
+                    <div className="mt-2 text-xs text-white/55">
+                      {job.reasoning_actions.join(" | ")}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </section>

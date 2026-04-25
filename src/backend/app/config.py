@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     blender_template_blend: str = "assets/mixamo_template.blend"
     blender_bone_prefix: str = "mixamorig:"
     default_export_fps: int = 30
+    k2_enabled: bool = True
+    k2_api_key: str = ""
+    k2_base_url: str = "https://api.k2think.ai/v1/chat/completions"
+    k2_model_name: str = "MBZUAI-IFM/K2-Think-v2"
+    k2_timeout_seconds: int = 45
 
     @property
     def storage_path(self) -> Path:
