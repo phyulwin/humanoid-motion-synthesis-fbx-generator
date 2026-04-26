@@ -44,7 +44,7 @@ Built the frontend with Next.js, React, Tailwind CSS, and React Three Fiber to h
 
 ## Accomplishments that we're proud of
 
-Built a working project that turns a short dance video into a moving 3D avatar and exports it as an FBX animation file. Created a strong MVP that clearly shows how the product helps creators save time by generating animations automatically instead of animating by hand. Successfully combined AI pose detection, K2 Think V2 reasoning, live browser preview, and Blender FBX export into one complete workflow.
+Built a reliable hackathon MVP that maps curated sample videos to matching pre-made Mixamo animations and previews them on a 3D avatar. Integrated K2 Think V2 as a reasoning layer that summarizes the uploaded motion context and supports the demo narrative with intelligible motion labels. Delivered an end-to-end workflow with video upload, matched animation preview, controlled playback, and Blender-based FBX export in one operational pipeline.
 
 ## What we learned
 

@@ -21,12 +21,22 @@ Built with the following tools and libraries -
 
 ## Attribution Note
 
-This project uses third-party frameworks, libraries, and developer tools listed above. We acknowledge all open-source software, platform tooling, and AI-assisted development support used during the hackathon, and we clearly distinguish team-built application logic from external tooling in the README and Devpost submission.
+This project uses third-party frameworks, libraries, and developer tools listed above. We acknowledge all open-source software, platform tooling, and AI-assisted development support used during the hackathon, and we clearly distinguish team-built application logic from external tooling.
 
 ---
 
-## Media (Videos, Images) Used
+## Media Credits
 
-### [Pexels Free License](https://www.pexels.com/license/)
+[Pexels Free License](https://www.pexels.com/license/)
 
-https://www.pexels.com/video/daring-rooftop-parkour-stunt-in-coastal-setting-35614071/
+- [A Woman Walking on the Sidewalk](https://www.pexels.com/video/a-woman-walking-on-the-sidewalk-10593429/) by Pexels Creator :contentReference[oaicite:0]{index=0}
+
+- [Happy Woman Clapping](https://www.pexels.com/video/happy-woman-clapping-4588257/) by Pexels Creator :contentReference[oaicite:1]{index=1}
+
+- [Man Standing on a Boulder Waving for Attention](https://www.pexels.com/video/low-angle-footage-of-a-man-standing-on-a-boulder-waving-to-signal-or-call-for-attention-3010204/) by Pexels Creator
+
+- [Woman Shadow Boxing](https://www.pexels.com/video/woman-shadow-boxing-8478084/) by Pexels Creator
+
+- [Daring Rooftop Parkour Stunt](https://www.pexels.com/video/daring-rooftop-parkour-stunt-in-coastal-setting-35614071/) by Pexels Creator
+
+All videos are sourced from Pexels and used for educational and demo purposes under the Pexels license. Mixamo free animation files and humanoid rigs were used for animation matching, avatar retargeting, and FBX export throughout the project.
