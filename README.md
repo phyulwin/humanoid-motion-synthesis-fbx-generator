@@ -28,6 +28,8 @@ Kinetic X Studio allows users to upload a short dance or movement video through 
 
 ## How we built it
 
+Built the frontend with Next.js, React, Tailwind CSS, and React Three Fiber to handle video upload, live 3D avatar preview, and animation controls. Developed the backend with FastAPI, Python, FFmpeg, and MediaPipe to process uploaded videos, extract pose motion, and prepare structured joint data. Used K2 Think V2 for motion reasoning and Blender Python API with Mixamo rigs to retarget animations and export reusable FBX files. ChatGPT and Codex were used for coding and development throughout the project.
+
 ## Challenges we ran into
 
 1. FBX export kept failing because Blender was exporting only the armature without the actual mesh. This caused downloaded files to open with missing models or no animation at all. 

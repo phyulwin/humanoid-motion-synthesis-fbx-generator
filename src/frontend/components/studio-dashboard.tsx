@@ -21,6 +21,31 @@ const NAV_ITEMS = ["Studio", "Animations", "Avatars", "Templates", "Exports", "S
 const ENVIRONMENT_PRESETS = ["Neon Stage", "Midnight Hall", "Warm Desert", "Studio Black"];
 const LIGHTING_PRESETS = ["Halo", "Cinema", "Aurora", "Sunset"];
 const AVATAR_VARIANTS = ["Studio Dancer", "Chrome Echo", "Amber Guard"];
+const SAMPLE_ANIMATION_MAP = [
+  { videoKeys: ["sample-laughing", "laugh", "laughing"], animationFile: "/clapping-hand.fbx", label: "clapping-hand.fbx" },
+  { videoKeys: ["sample-boxing", "boxing", "box"], animationFile: "/boxing.fbx", label: "boxing.fbx" },
+  { videoKeys: ["sample-walking", "sample-walk", "walking", "walk"], animationFile: "/walking.fbx", label: "walking.fbx" },
+  { videoKeys: ["sample-waving", "waving", "wave"], animationFile: "/waving.fbx", label: "waving.fbx" },
+  { videoKeys: ["sample-run-jump", "run-jump", "runjump"], animationFile: "/run-jump.fbx", label: "run-jump.fbx" }
+];
+
+function resolveSampleAnimation(uploadedFileName: string | null | undefined) {
+  // This helper maps known hackathon sample filenames to curated Mixamo animation assets.
+  if (!uploadedFileName) {
+    return null;
+  }
+
+  const normalizedName = uploadedFileName.toLowerCase();
+  for (const entry of SAMPLE_ANIMATION_MAP) {
+    for (const videoKey of entry.videoKeys) {
+      if (normalizedName.includes(videoKey)) {
+        return entry;
+      }
+    }
+  }
+
+  return null;
+}
 
 export default function StudioDashboard() {
   // This client component manages upload state, polling, export actions, and all dashboard controls.
@@ -148,6 +173,8 @@ export default function StudioDashboard() {
   const thumbnailUrl = resolveFileUrl(job?.thumbnail_url || null);
   const uploadPreviewUrl = localVideoUrl || thumbnailUrl;
   const exportUrl = resolveFileUrl(job?.export_url || null);
+  const matchedSampleAnimation = resolveSampleAnimation(selectedFile?.name || job?.filename);
+  const canAnimatePreview = Boolean(job?.preview_frames?.length) && (job?.status === "ready" || job?.status === "completed");
 
   function handleChangeAvatar() {
     // This handler rotates through the available in-browser avatar variants for the live preview.
@@ -365,10 +392,12 @@ export default function StudioDashboard() {
               </div>
               <AvatarPreview
                 avatarVariant={avatarVariant}
+                canAnimate={canAnimatePreview}
                 environmentPreset={environmentPreset}
                 frames={job?.preview_frames || []}
                 lightingPreset={lightingPreset}
                 loopAnimation={settings.loopAnimation}
+                matchedAnimationAsset={matchedSampleAnimation?.animationFile || null}
                 onFrameChange={handlePreviewFrameChange}
                 waveform={job?.waveform || []}
               />
@@ -446,6 +475,7 @@ export default function StudioDashboard() {
                       <div>Environment: {environmentPreset}</div>
                       <div>Lighting: {lightingPreset}</div>
                       <div>Rig: {settings.avatarRig}</div>
+                      <div>Preview Animation: {matchedSampleAnimation?.label || "Live motion preview"}</div>
                     </div>
                   </div>
                   <div className="mt-4">

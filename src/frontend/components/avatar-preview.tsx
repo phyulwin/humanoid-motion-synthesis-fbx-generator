@@ -3,7 +3,7 @@
 
 "use client";
 
-import { OrbitControls, PerspectiveCamera, Sparkles, useFBX } from "@react-three/drei";
+import { OrbitControls, PerspectiveCamera, Sparkles, useAnimations, useFBX } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -18,6 +18,8 @@ type AvatarPreviewProps = {
   environmentPreset: string;
   lightingPreset: string;
   avatarVariant: string;
+  canAnimate: boolean;
+  matchedAnimationAsset: string | null;
   onFrameChange?: (frame: PreviewFrame, frameIndex: number) => void;
 };
 
@@ -454,6 +456,8 @@ function AnimatedAvatar({
   showSkin,
   showSkeleton,
   avatarVariant,
+  canAnimate,
+  matchedAnimationAsset,
   onFrameChange,
 }: {
   frames: PreviewFrame[];
@@ -461,17 +465,26 @@ function AnimatedAvatar({
   showSkin: boolean;
   showSkeleton: boolean;
   avatarVariant: string;
+  canAnimate: boolean;
+  matchedAnimationAsset: string | null;
   onFrameChange?: (frame: PreviewFrame, frameIndex: number) => void;
 }) {
-  // This component loads the FBX avatar, binds motion data to bones, and renders the rig.
+  // This component loads the FBX avatar, plays curated sample animations when available, and falls back to joint retargeting otherwise.
   const sourceFbx = useFBX("/mixamo_model.fbx");
+  const sampleAnimationFbx = useFBX(matchedAnimationAsset || "/walking.fbx");
   const clonedScene = useMemo(() => clone(sourceFbx), [sourceFbx]);
+  const animationClips = useMemo(
+    () => (matchedAnimationAsset ? sampleAnimationFbx.animations.map((clip) => clip.clone()) : []),
+    [matchedAnimationAsset, sampleAnimationFbx],
+  );
   const groupRef = useRef<THREE.Group>(null);
   const helperRef = useRef<THREE.SkeletonHelper | null>(null);
   const boneMapRef = useRef<BoneMap>({});
   const bonePoseMapRef = useRef<BonePoseMap>({});
   const boneRestMapRef = useRef<BoneRestMap>({});
   const lastReportedFrameRef = useRef(-1);
+  const playbackTimeRef = useRef(0);
+  const { actions, names } = useAnimations(animationClips, clonedScene);
 
   useEffect(() => {
     // This effect prepares the avatar transform and caches resolved rig bones.
@@ -486,6 +499,10 @@ function AnimatedAvatar({
     bonePoseMapRef.current = captureBonePoseMap(boneMapRef.current);
     boneRestMapRef.current = captureBoneRestMap(boneMapRef.current);
     setSkinnedMeshVisibility(clonedScene, showSkin);
+    if (groupRef.current) {
+      groupRef.current.position.set(0, 0, 0);
+      groupRef.current.rotation.set(0, 0, 0);
+    }
 
     if (helperRef.current) {
       helperRef.current.visible = showSkeleton;
@@ -520,13 +537,76 @@ function AnimatedAvatar({
     }
   }, [clonedScene, showSkin, showSkeleton]);
 
-  useFrame((state) => {
-    // This frame loop advances the motion clip and applies joint-driven rotations to the loaded rig.
+  useEffect(() => {
+    // This effect resets preview playback whenever the source clip changes or the preview is not yet ready.
+    playbackTimeRef.current = 0;
+    lastReportedFrameRef.current = -1;
+  }, [canAnimate, frames, matchedAnimationAsset]);
+
+  useEffect(() => {
+    // This effect plays the matched curated animation clip for known hackathon sample videos.
+    for (const action of Object.values(actions)) {
+      action?.stop();
+    }
+
+    if (!matchedAnimationAsset || !names.length || !canAnimate) {
+      return;
+    }
+
+    const activeAction = actions[names[0]];
+    if (!activeAction) {
+      return;
+    }
+
+    activeAction.reset();
+    activeAction.setLoop(loopAnimation ? THREE.LoopRepeat : THREE.LoopOnce, loopAnimation ? Infinity : 1);
+    activeAction.clampWhenFinished = true;
+    activeAction.play();
+
+    return () => {
+      activeAction.stop();
+    };
+  }, [actions, canAnimate, loopAnimation, matchedAnimationAsset, names]);
+
+  useFrame((state, delta) => {
+    // This frame loop either reports canned-animation timing or applies the legacy joint retargeting path.
+    if (!canAnimate) {
+      return;
+    }
+
+    if (matchedAnimationAsset) {
+      if (helperRef.current) {
+        helperRef.current.visible = showSkeleton;
+      }
+
+      playbackTimeRef.current += delta;
+
+      if (!frames.length || !onFrameChange) {
+        return;
+      }
+
+      const sampleDuration = animationClips[0]?.duration || Math.max(frames.length / 24, 0.001);
+      const normalizedTime = loopAnimation
+        ? playbackTimeRef.current % sampleDuration
+        : Math.min(playbackTimeRef.current, sampleDuration);
+      const nextFrameIndex = Math.min(
+        Math.floor((normalizedTime / Math.max(sampleDuration, 0.001)) * frames.length),
+        frames.length - 1,
+      );
+
+      if (lastReportedFrameRef.current !== nextFrameIndex) {
+        lastReportedFrameRef.current = nextFrameIndex;
+        onFrameChange(frames[nextFrameIndex], nextFrameIndex);
+      }
+      return;
+    }
+
     if (!frames.length) {
       return;
     }
 
-    const clipTime = state.clock.getElapsedTime() * 24;
+    playbackTimeRef.current += delta;
+    const clipTime = playbackTimeRef.current * 24;
     const nextFrameIndex = loopAnimation
       ? Math.floor(clipTime % frames.length)
       : Math.min(Math.floor(clipTime), frames.length - 1);
@@ -762,21 +842,39 @@ export default function AvatarPreview({
   environmentPreset,
   lightingPreset,
   avatarVariant,
+  canAnimate,
+  matchedAnimationAsset,
   onFrameChange,
 }: AvatarPreviewProps) {
   // This component assembles the canvas, preview controls, and animated timeline.
   const [showSkin, setShowSkin] = useState(true);
   const [showSkeleton, setShowSkeleton] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const environmentStyle = ENVIRONMENT_STYLES[environmentPreset] ?? ENVIRONMENT_STYLES["Neon Stage"];
   const lightingStyle = LIGHTING_STYLES[lightingPreset] ?? LIGHTING_STYLES.Halo;
 
   const safeFrames = frames;
+
+  useEffect(() => {
+    // This effect starts playback automatically once a ready preview exists and pauses it again when the preview is not ready.
+    setIsPlaying(canAnimate);
+  }, [canAnimate, matchedAnimationAsset, safeFrames]);
 
   return (
     <div className={`flex flex-col rounded-[28px] border border-white/10 ${environmentStyle.backgroundClassName}`}>
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
         <div className="text-xs uppercase tracking-[0.22em] text-white/45">Avatar Preview Controls</div>
         <div className="flex gap-2">
+          <button
+            className={`rounded-full px-3 py-2 text-xs ${
+              canAnimate && isPlaying ? "bg-[rgba(216,255,40,0.18)] text-accent" : "bg-white/[0.05] text-white/70"
+            }`}
+            disabled={!canAnimate}
+            type="button"
+            onClick={() => setIsPlaying((current) => !current)}
+          >
+            {isPlaying ? "Pause Model" : "Play Model"}
+          </button>
           <button
             className={`rounded-full px-3 py-2 text-xs ${
               showSkin ? "bg-[rgba(216,255,40,0.18)] text-accent" : "bg-white/[0.05] text-white/70"
@@ -813,10 +911,12 @@ export default function AvatarPreview({
 
           <AnimatedAvatar
             frames={safeFrames}
+            canAnimate={canAnimate && isPlaying}
             loopAnimation={loopAnimation}
             showSkin={showSkin}
             showSkeleton={showSkeleton}
             avatarVariant={avatarVariant}
+            matchedAnimationAsset={matchedAnimationAsset}
             onFrameChange={onFrameChange}
           />
 
