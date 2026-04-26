@@ -12,6 +12,8 @@ Built with the following tools and libraries -
 
 **Animation Export Pipeline:** [Blender Python API](https://docs.blender.org/api/current/), [Autodesk FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)
 
+**[K2 Think V2](https://huggingface.co/LLM360/K2-Think-V2) by [LLM360](https://huggingface.co/LLM360)** was used as the reasoning layer for motion analysis, pose cleanup, occluded joint prediction, and motion context generation in the animation pipeline.
+
 ---
 
 ## AI Tools Used
