@@ -5,7 +5,9 @@ Web AI Humanoid Animator - Turn any video into a reusable humanoid FBX animation
 - Project Setup and Implementation details: [PROJECT.md](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/blob/main/PROJECT.md)
 - Project Credits: [CREDIT.md](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/blob/main/CREDIT.md)
 
-![Project Screenshot](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/doc/screenshot-4.png)
+
+![Project Screenshot](doc/screenshot-4.png)
+
 
 Test the model file: To preview the downloaded `.fbx` animation file online, use:
 
