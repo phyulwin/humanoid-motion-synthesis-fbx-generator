@@ -40,9 +40,3 @@ export type JobRecord = {
   reasoning_model: string | null;
   error: string | null;
 };
-
-export type DashboardUser = {
-  name: string;
-  email?: string;
-  picture?: string;
-};

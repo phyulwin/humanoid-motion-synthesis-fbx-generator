@@ -44,7 +44,7 @@ class MotionPipeline:
                 error=None,
             )
             upload_path = self._resolve_upload_path(job)
-            normalized_path = self._normalize_video(job.id, upload_path, job.settings.frame_rate)
+            normalized_path = self._normalize_video(job, upload_path, job.settings.frame_rate)
 
             self.store.update_job(
                 job_id,
@@ -98,16 +98,28 @@ class MotionPipeline:
         relative_path = job.upload_url.replace("/files/", "", 1)
         return self.settings.storage_path / relative_path
 
-    def _normalize_video(self, job_id: str, upload_path: Path, frame_rate: int) -> Path:
+    def _resolve_trim_window(self, job: JobRecord) -> tuple[float, float]:
+        # This helper converts UI trim values into a safe FFmpeg start time and duration.
+        trim_start = max(0.0, float(job.settings.trim_start or 0.0))
+        trim_end = max(trim_start, float(job.settings.trim_end or trim_start))
+        trim_duration = max(0.1, trim_end - trim_start)
+        return trim_start, trim_duration
+
+    def _normalize_video(self, job: JobRecord, upload_path: Path, frame_rate: int) -> Path:
         # This helper tries to normalize the video with FFmpeg and falls back to the original file if unavailable.
         ffmpeg_path = self._resolve_executable(self.settings.ffmpeg_executable)
         if not ffmpeg_path:
             return upload_path
 
-        output_path = self.settings.uploads_path / f"{job_id}_normalized.mp4"
+        trim_start, trim_duration = self._resolve_trim_window(job)
+        output_path = self.settings.uploads_path / f"{job.id}_normalized.mp4"
         command = [
             ffmpeg_path,
             "-y",
+            "-ss",
+            f"{trim_start:.3f}",
+            "-t",
+            f"{trim_duration:.3f}",
             "-i",
             str(upload_path),
             "-vf",
@@ -189,7 +201,7 @@ class MotionPipeline:
         except Exception:
             pass
 
-        return self._generate_fallback_motion(job.settings.frame_rate)
+        return self._generate_fallback_motion(job.settings.frame_rate, job.settings.trim_start, job.settings.trim_end)
 
     def _normalize_landmarks(self, landmarks) -> dict[str, JointPoint]:
         # This helper converts MediaPipe landmarks into a smaller normalized humanoid joint set.
@@ -233,17 +245,20 @@ class MotionPipeline:
             )
         return normalized
 
-    def _generate_fallback_motion(self, frame_rate: int) -> list[PreviewFrame]:
+    def _generate_fallback_motion(self, frame_rate: int, trim_start: float, trim_end: float) -> list[PreviewFrame]:
         # This helper generates a synthetic dance loop so the UI remains demoable without CV dependencies.
         preview_frames: list[PreviewFrame] = []
-        total_frames = 48
+        safe_start = max(0.0, float(trim_start or 0.0))
+        safe_end = max(safe_start, float(trim_end or safe_start))
+        clip_duration = max(0.1, safe_end - safe_start)
+        total_frames = max(2, min(48, int(round(clip_duration * max(frame_rate, 1)))))
         for index in range(total_frames):
             progress = index / max(total_frames - 1, 1)
             sway = math.sin(progress * math.pi * 4.0)
             lift = math.cos(progress * math.pi * 2.0)
             preview_frames.append(
                 PreviewFrame(
-                    t=round(index / max(frame_rate, 1), 4),
+                    t=round(safe_start + (index / max(frame_rate, 1)), 4),
                     joints={
                         "head": JointPoint(x=0.0, y=2.4 + (lift * 0.08), z=0.05 * sway),
                         "neck": JointPoint(x=0.0, y=1.85, z=0.0),

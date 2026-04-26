@@ -7,12 +7,7 @@ import { useEffect, useState } from "react";
 
 import AvatarPreview from "@/components/avatar-preview";
 import { createJob, fetchJob, requestExport, resolveFileUrl } from "@/lib/api";
-import type { DashboardUser, JobRecord } from "@/lib/types";
-
-type StudioDashboardProps = {
-  user: DashboardUser | null;
-  authEnabled: boolean;
-};
+import type { JobRecord } from "@/lib/types";
 
 type UploadSettings = {
   avatarRig: string;
@@ -27,7 +22,7 @@ const ENVIRONMENT_PRESETS = ["Neon Stage", "Midnight Hall", "Warm Desert", "Stud
 const LIGHTING_PRESETS = ["Halo", "Cinema", "Aurora", "Sunset"];
 const AVATAR_VARIANTS = ["Studio Dancer", "Chrome Echo", "Amber Guard"];
 
-export default function StudioDashboard({ user, authEnabled }: StudioDashboardProps) {
+export default function StudioDashboard() {
   // This client component manages upload state, polling, export actions, and all dashboard controls.
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
@@ -192,45 +187,7 @@ export default function StudioDashboard({ user, authEnabled }: StudioDashboardPr
                 <div className="mb-2 text-xs uppercase tracking-[0.38em] text-white/50">
                   Capture. Motion. Bring to Life.
                 </div>
-                <h1 className="text-4xl font-black tracking-tight lg:text-6xl">
-                  Turn real movement into <span className="hero-gradient">fluid 3D animation.</span>
-                </h1>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
-                  {job ? `${progressValue}% Progress` : "120 Credits"}
-                </div>
-                {authEnabled ? (
-                  user ? (
-                    <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
-                        {user.picture ? (
-                          <img
-                            alt={user.name}
-                            className="h-10 w-10 rounded-full object-cover"
-                            src={user.picture}
-                          />
-                        ) : (
-                          <span className="text-sm font-semibold">{user.name.slice(0, 1)}</span>
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold">{user.name}</div>
-                        <a className="text-xs text-white/55" href="/auth/logout">
-                          Sign out
-                        </a>
-                      </div>
-                    </div>
-                  ) : (
-                    <a className="accent-button rounded-full px-5 py-3 text-sm font-semibold" href="/auth/login">
-                      Sign in with Auth0
-                    </a>
-                  )
-                ) : (
-                  <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/60">
-                    Auth0 optional
-                  </div>
-                )}
+                  <h1 className="font-black tracking-tight">  <span className="block text-2xl lg:text-4xl">    Turn real movement into 3D animation with  </span>  <span className="block text-4xl lg:text-6xl hero-gradient">    Kinetic X Studio  </span></h1>
               </div>
             </div>
           </header>

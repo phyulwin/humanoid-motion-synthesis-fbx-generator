@@ -1,21 +1,18 @@
-# Credits
+# Project Credits & References
 
-## Built With
+Built with the following tools and libraries - 
 
-- [Next.js](https://nextjs.org/)
-- [React](https://react.dev/)
-- [TypeScript](https://www.typescriptlang.org/)
-- [Tailwind CSS](https://tailwindcss.com/)
-- [React Three Fiber](https://r3f.docs.pmnd.rs/)
-- [Three.js](https://threejs.org/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Python](https://www.python.org/)
-- [OpenCV](https://opencv.org/)
-- [MediaPipe](https://developers.google.com/mediapipe)
-- [Blender Python API](https://docs.blender.org/api/current/)
-- [Autodesk FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)
-- [Auth0](https://auth0.com/)
-- [FFmpeg](https://ffmpeg.org/)
+**Frontend:** [Next.js](https://nextjs.org/), [React](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), [Tailwind CSS](https://tailwindcss.com/)
+
+**3D Visualization:** [React Three Fiber](https://r3f.docs.pmnd.rs/), [Three.js](https://threejs.org/)
+
+**Backend API:** [FastAPI](https://fastapi.tiangolo.com/), [Python](https://www.python.org/)
+
+**Computer Vision & Pose Processing:** [OpenCV](https://opencv.org/), [MediaPipe](https://developers.google.com/mediapipe), [FFmpeg](https://ffmpeg.org/)
+
+**Animation Export Pipeline:** [Blender Python API](https://docs.blender.org/api/current/), [Autodesk FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk)
+
+---
 
 ## AI Tools Used
 
