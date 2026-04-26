@@ -1,9 +1,11 @@
 # Kinetic X Studio
 
-AI Humanoid Animator - Turn any video into a reusable humanoid FBX animation clip 🕺💃
+Web AI Humanoid Animator - Turn any video into a reusable humanoid FBX animation clip 🕺💃
 
 - Project Setup and Implementation details: [PROJECT.md](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/blob/main/PROJECT.md)
 - Project Credits: [CREDIT.md](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/blob/main/CREDIT.md)
+
+![Project Screenshot](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/doc/screenshot-4.png)
 
 Test the model file: To preview the downloaded `.fbx` animation file online, use:
 
@@ -20,7 +22,7 @@ I do game development and Blender modeling as a hobby, but creating character an
 
 ## What it does
 
-AI Humanoid Animator allows users to upload a short dance or movement video through a simple web application. The system analyzes the human motion, extracts body pose data, and converts it into a humanoid animation sequence. It then retargets that motion onto a standardized rig and exports it as a reusable FBX animation file compatible with Blender, Unity, and Unreal Engine. This helps creators, VTubers, and indie game developers generate custom animations faster without manual keyframing or expensive motion capture.
+Kinetic X Studio allows users to upload a short dance or movement video through a simple web application. The system analyzes the human motion, extracts body pose data, and converts it into a humanoid animation sequence. It then retargets that motion onto a standardized rig and exports it as a reusable FBX animation file compatible with Blender, Unity, and Unreal Engine. This helps creators, VTubers, and indie game developers generate custom animations faster without manual keyframing or expensive motion capture.
 
 ## How we built it
 
@@ -38,7 +40,7 @@ Built a working project that turns a short dance video into a moving 3D avatar a
 * Real pose tracking is better than fallback motion
 * Small backend bugs can break the whole pipeline
 
-## What's next for AI Humanoid Animator
+## What's next for K2 Think V2
 
 * Cloud storage and animation showcase gallery for managing saved FBX exports
 * FBX sharing, collaboration, and reusable animation library support
