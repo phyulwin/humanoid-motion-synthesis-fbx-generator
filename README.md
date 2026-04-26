@@ -30,6 +30,16 @@ Kinetic X Studio allows users to upload a short dance or movement video through 
 
 ## Challenges we ran into
 
+1. FBX export kept failing because Blender was exporting only the armature without the actual mesh. This caused downloaded files to open with missing models or no animation at all. 
+
+2. The avatar preview looked broken because bones were collapsing, legs merged into the body, and motion looked unnatural. Retargeting and bone rotation logic had to be rebuilt to make the model move like a real human.
+
+3. MediaPipe pose extraction was not running correctly because the backend used the wrong Python environment. This forced the system into synthetic fallback motion, making animations stiff and inaccurate instead of using real video movement.
+
+4. K2 Think V2 reasoning kept failing because the API response was empty or invalid JSON. This prevented the reasoning layer from improving pose cleanup, spatial logic, and occluded joint prediction.
+
+5. Time was a major challenge because this was built during a short hackathon as a solo developer, requiring rapid decisions, constant debugging, and heavy reliance on Codex and ChatGPT to move fast enough while still delivering a working MVP.
+
 ## Accomplishments that we're proud of
 
 Built a working project that turns a short dance video into a moving 3D avatar and exports it as an FBX animation file. Created a strong MVP that clearly shows how the product helps creators save time by generating animations automatically instead of animating by hand. Successfully combined AI pose detection, K2 Think V2 reasoning, live browser preview, and Blender FBX export into one complete workflow.

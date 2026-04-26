@@ -224,17 +224,6 @@ function toVector3(joint?: { x: number; y: number; z: number }): THREE.Vector3 {
   return new THREE.Vector3(joint?.x ?? 0, joint?.y ?? 0, joint?.z ?? 0);
 }
 
-function limbAngles(startJoint: THREE.Vector3, endJoint: THREE.Vector3): { pitch: number; yaw: number; roll: number } {
-  // This helper converts a pair of joints into fuller 3-axis limb angles for a less rigid preview.
-  const direction = endJoint.clone().sub(startJoint);
-  const safeVertical = Math.max(Math.abs(direction.y), 0.001);
-  const horizontalDistance = Math.max(Math.hypot(direction.x, direction.z), 0.001);
-  const roll = Math.atan2(direction.x, safeVertical);
-  const pitch = Math.atan2(direction.z, safeVertical);
-  const yaw = Math.atan2(direction.x, horizontalDistance + Math.abs(direction.z) * 0.35);
-  return { pitch, yaw, roll };
-}
-
 function twistAngles(leftJoint: THREE.Vector3, rightJoint: THREE.Vector3): { yaw: number; roll: number } {
   // This helper estimates torso and shoulder twist from left-right joint span.
   const direction = rightJoint.clone().sub(leftJoint);
@@ -250,6 +239,7 @@ function setBoneRotation(
   pitch = 0,
   yaw = 0,
   roll = 0,
+  blendFactor = 1,
 ) {
   // This helper applies rotations relative to the source rig pose so skinning stays stable.
   if (!bone || !baseQuaternion) {
@@ -257,7 +247,8 @@ function setBoneRotation(
   }
 
   const offsetQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, roll, "XYZ"));
-  bone.quaternion.copy(baseQuaternion).multiply(offsetQuaternion);
+  const targetQuaternion = baseQuaternion.clone().multiply(offsetQuaternion);
+  bone.quaternion.slerp(targetQuaternion, blendFactor);
 }
 
 function setBoneDirectionRotation(
@@ -266,6 +257,7 @@ function setBoneDirectionRotation(
   restDirection: THREE.Vector3 | undefined,
   targetDirection: THREE.Vector3,
   twist = 0,
+  blendFactor = 1,
 ) {
   // This helper aligns a bone to the target motion direction using rest-pose vectors for stronger spatial fidelity.
   if (!bone || !baseQuaternion || !restDirection || targetDirection.lengthSq() < 0.000001) {
@@ -275,7 +267,32 @@ function setBoneDirectionRotation(
   const normalizedTarget = targetDirection.clone().normalize();
   const directionOffset = new THREE.Quaternion().setFromUnitVectors(restDirection, normalizedTarget);
   const twistOffset = new THREE.Quaternion().setFromAxisAngle(normalizedTarget, twist);
-  bone.quaternion.copy(baseQuaternion).multiply(directionOffset).multiply(twistOffset);
+  const targetQuaternion = baseQuaternion.clone().multiply(directionOffset).multiply(twistOffset);
+  bone.quaternion.slerp(targetQuaternion, blendFactor);
+}
+
+function clampValue(value: number, minimum: number, maximum: number): number {
+  // This helper constrains unstable motion values into a conservative range for the preview rig.
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function spreadPair(
+  leftJoint: THREE.Vector3,
+  rightJoint: THREE.Vector3,
+  minimumDistance: number,
+): { leftJoint: THREE.Vector3; rightJoint: THREE.Vector3 } {
+  // This helper keeps mirrored joints separated laterally so the legs do not merge into the torso.
+  const currentDistance = rightJoint.x - leftJoint.x;
+  if (currentDistance >= minimumDistance) {
+    return { leftJoint, rightJoint };
+  }
+
+  const midpoint = (leftJoint.x + rightJoint.x) / 2;
+  const halfDistance = minimumDistance / 2;
+  return {
+    leftJoint: new THREE.Vector3(midpoint - halfDistance, leftJoint.y, leftJoint.z),
+    rightJoint: new THREE.Vector3(midpoint + halfDistance, rightJoint.y, rightJoint.z),
+  };
 }
 
 function findBoneByCandidates(root: THREE.Object3D, candidates: string[]): THREE.Bone | undefined {
@@ -454,7 +471,6 @@ function AnimatedAvatar({
   const boneMapRef = useRef<BoneMap>({});
   const bonePoseMapRef = useRef<BonePoseMap>({});
   const boneRestMapRef = useRef<BoneRestMap>({});
-  const frameIndexRef = useRef(0);
   const lastReportedFrameRef = useRef(-1);
 
   useEffect(() => {
@@ -515,7 +531,6 @@ function AnimatedAvatar({
       ? Math.floor(clipTime % frames.length)
       : Math.min(Math.floor(clipTime), frames.length - 1);
 
-    frameIndexRef.current = nextFrameIndex;
     const activeFrame = frames[nextFrameIndex];
     const joints = activeFrame.joints;
     const boneMap = boneMapRef.current;
@@ -542,12 +557,23 @@ function AnimatedAvatar({
 
     const shoulderTwist = twistAngles(leftShoulder, rightShoulder);
     const hipTwist = twistAngles(leftKnee, rightKnee);
+    const motionBlend = 0.26;
+
+    const spreadKnees = spreadPair(leftKnee, rightKnee, 0.92);
+    const spreadFeet = spreadPair(leftFoot, rightFoot, 1.18);
+    const spreadToes = spreadPair(leftToe, rightToe, 1.28);
+    const stableLeftKnee = spreadKnees.leftJoint;
+    const stableRightKnee = spreadKnees.rightJoint;
+    const stableLeftFoot = spreadFeet.leftJoint;
+    const stableRightFoot = spreadFeet.rightJoint;
+    const stableLeftToe = spreadToes.leftJoint;
+    const stableRightToe = spreadToes.rightJoint;
 
     if (boneMap.hips) {
       boneMap.hips.position.copy(bonePoseMap.hipsPosition ?? boneMap.hips.position);
-      boneMap.hips.position.x += hips.x * 0.04;
-      boneMap.hips.position.y += (hips.y - 0.7) * 0.03;
-      boneMap.hips.position.z += hips.z * 0.05;
+      boneMap.hips.position.x += clampValue(hips.x, -0.75, 0.75) * 0.025;
+      boneMap.hips.position.y += clampValue(hips.y - 0.7, -0.4, 0.4) * 0.024;
+      boneMap.hips.position.z += clampValue(hips.z, -0.8, 0.8) * 0.03;
     }
 
     setBoneDirectionRotation(
@@ -556,6 +582,7 @@ function AnimatedAvatar({
       boneRestMap.spineDirection,
       spine.clone().sub(hips),
       shoulderTwist.yaw * 0.35,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.chest,
@@ -563,6 +590,7 @@ function AnimatedAvatar({
       boneRestMap.chestDirection,
       chest.clone().sub(spine),
       shoulderTwist.yaw * 0.45,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.neck,
@@ -570,6 +598,7 @@ function AnimatedAvatar({
       boneRestMap.neckDirection,
       neck.clone().sub(chest),
       shoulderTwist.yaw * 0.25,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.head,
@@ -577,6 +606,7 @@ function AnimatedAvatar({
       boneRestMap.headDirection,
       head.clone().sub(neck),
       shoulderTwist.yaw * 0.18,
+      motionBlend,
     );
 
     setBoneDirectionRotation(
@@ -584,98 +614,128 @@ function AnimatedAvatar({
       bonePoseMap.leftShoulderQuaternion,
       boneRestMap.leftShoulderDirection,
       leftShoulder.clone().sub(chest),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.leftArm,
       bonePoseMap.leftArmQuaternion,
       boneRestMap.leftArmDirection,
       leftElbow.clone().sub(leftShoulder),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.leftForeArm,
       bonePoseMap.leftForeArmQuaternion,
       boneRestMap.leftForeArmDirection,
       leftHand.clone().sub(leftElbow),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.leftHand,
       bonePoseMap.leftHandQuaternion,
       boneRestMap.leftHandDirection,
       leftHand.clone().sub(leftElbow),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightShoulder,
       bonePoseMap.rightShoulderQuaternion,
       boneRestMap.rightShoulderDirection,
       rightShoulder.clone().sub(chest),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightArm,
       bonePoseMap.rightArmQuaternion,
       boneRestMap.rightArmDirection,
       rightElbow.clone().sub(rightShoulder),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightForeArm,
       bonePoseMap.rightForeArmQuaternion,
       boneRestMap.rightForeArmDirection,
       rightHand.clone().sub(rightElbow),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightHand,
       bonePoseMap.rightHandQuaternion,
       boneRestMap.rightHandDirection,
       rightHand.clone().sub(rightElbow),
+      0,
+      motionBlend,
     );
 
     setBoneRotation(
       boneMap.hips,
       bonePoseMap.hipsQuaternion,
-      0,
-      hipTwist.yaw * 0.35,
-      0,
+      clampValue((chest.z - hips.z) * 0.08, -0.22, 0.22),
+      clampValue(hipTwist.yaw * 0.35, -0.35, 0.35),
+      clampValue((stableLeftKnee.y - stableRightKnee.y) * 0.04, -0.2, 0.2),
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.leftUpLeg,
       bonePoseMap.leftUpLegQuaternion,
       boneRestMap.leftUpLegDirection,
-      leftKnee.clone().sub(hips),
-      hipTwist.yaw * 0.08,
+      stableLeftKnee.clone().sub(hips),
+      clampValue(hipTwist.yaw * 0.05, -0.14, 0.14),
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.leftLeg,
       bonePoseMap.leftLegQuaternion,
       boneRestMap.leftLegDirection,
-      leftFoot.clone().sub(leftKnee),
+      stableLeftFoot.clone().sub(stableLeftKnee),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.leftFoot,
       bonePoseMap.leftFootQuaternion,
       boneRestMap.leftFootDirection,
-      leftToe.clone().sub(leftFoot),
+      stableLeftToe.clone().sub(stableLeftFoot),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightUpLeg,
       bonePoseMap.rightUpLegQuaternion,
       boneRestMap.rightUpLegDirection,
-      rightKnee.clone().sub(hips),
-      hipTwist.yaw * 0.08,
+      stableRightKnee.clone().sub(hips),
+      clampValue(hipTwist.yaw * 0.05, -0.14, 0.14),
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightLeg,
       bonePoseMap.rightLegQuaternion,
       boneRestMap.rightLegDirection,
-      rightFoot.clone().sub(rightKnee),
+      stableRightFoot.clone().sub(stableRightKnee),
+      0,
+      motionBlend,
     );
     setBoneDirectionRotation(
       boneMap.rightFoot,
       bonePoseMap.rightFootQuaternion,
       boneRestMap.rightFootDirection,
-      rightToe.clone().sub(rightFoot),
+      stableRightToe.clone().sub(stableRightFoot),
+      0,
+      motionBlend,
     );
 
     if (groupRef.current) {
-      groupRef.current.rotation.y = Math.sin(state.clock.getElapsedTime() * 0.18) * 0.08;
+      const targetRootX = clampValue(hips.x * 0.24, -0.85, 0.85);
+      const targetRootY = clampValue((hips.y - 0.7) * 0.12, -0.2, 0.2);
+      const targetRootZ = clampValue(hips.z * 0.26, -0.95, 0.95);
+      groupRef.current.position.lerp(new THREE.Vector3(targetRootX, targetRootY, targetRootZ), 0.12);
     }
 
     if (helperRef.current) {

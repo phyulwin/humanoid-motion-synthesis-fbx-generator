@@ -378,6 +378,9 @@ export default function StudioDashboard() {
                     <div className="mb-2 text-xs uppercase tracking-[0.22em] text-white/45">
                       {job.reasoning_model || "Reasoning Layer"}
                     </div>
+                    {job.motion_context ? (
+                      <div className="mb-2 text-xs text-white/60">Clip context: {job.motion_context}</div>
+                    ) : null}
                     <div>{job.reasoning_summary}</div>
                     {job.reasoning_actions.length ? (
                       <div className="mt-2 text-xs text-white/55">

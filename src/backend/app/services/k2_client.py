@@ -20,6 +20,9 @@ class MotionReasoningResult:
     hip_sway_boost: float
     shoulder_sway_boost: float
     head_bounce_boost: float
+    root_motion_boost: float
+    stance_width_boost: float
+    jitter_suppression: float
     smoothing_window: int
     occluded_joint_fills: dict[int, dict[str, dict[str, float]]]
     confidence: str
@@ -40,13 +43,14 @@ class K2ReasoningClient:
         self,
         preview_frames: list[PreviewFrame],
         frame_rate: int,
+        motion_context: str,
         occlusion_masks: list[dict[str, bool]] | None = None,
     ) -> MotionReasoningResult | None:
         # This method submits a compact motion sample to K2 Think V2 and returns parsed cleanup directives.
         if not self.is_enabled() or not preview_frames:
             return None
 
-        payload = self._build_payload(preview_frames, frame_rate, occlusion_masks or [])
+        payload = self._build_payload(preview_frames, frame_rate, motion_context, occlusion_masks or [])
         headers = {
             "accept": "application/json",
             "Authorization": f"Bearer {self.settings.k2_api_key}",
@@ -65,6 +69,7 @@ class K2ReasoningClient:
         self,
         preview_frames: list[PreviewFrame],
         frame_rate: int,
+        motion_context: str,
         occlusion_masks: list[dict[str, bool]],
     ) -> dict:
         # This method builds a small JSON prompt that keeps K2 focused on correction policy rather than raw inference.
@@ -93,7 +98,10 @@ class K2ReasoningClient:
         instructions = (
             "You are reviewing dance motion data for humanoid FBX export. "
             "Return strict JSON only. "
-            "Decide how to improve readability of arms, legs, torso sway, shoulder sway, head bounce, and temporal smoothness. "
+            f"Clip intent and scene context: {motion_context}. "
+            "Decide how to improve readability of arms, legs, torso sway, shoulder sway, head bounce, root motion, stance width, and temporal smoothness. "
+            "Respect the clip intent. For walking clips, keep legs below the hips, maintain ground contact, and avoid airborne dance poses. "
+            "Preserve spatial logic of a real human body, including pelvis balance, leg separation, grounded feet, and non-intersecting limbs. "
             "When some limbs are occluded or out of frame, infer plausible joint coordinates from surrounding frames and bilateral body context. "
             "Do not invent new joints. "
             "JSON schema: "
@@ -104,6 +112,9 @@ class K2ReasoningClient:
             "\"hip_sway_boost\": number between 0.8 and 1.8, "
             "\"shoulder_sway_boost\": number between 0.8 and 1.8, "
             "\"head_bounce_boost\": number between 0.8 and 1.6, "
+            "\"root_motion_boost\": number between 0.8 and 1.8, "
+            "\"stance_width_boost\": number between 0.9 and 1.8, "
+            "\"jitter_suppression\": number between 0.0 and 1.0, "
             "\"smoothing_window\": integer between 1 and 7, "
             "\"occluded_joint_fills\": [{\"source_frame_index\": integer, \"joints\": {\"joint_name\": {\"x\": number, \"y\": number, \"z\": number}}}], "
             "\"confidence\": \"low\"|\"medium\"|\"high\"}."
@@ -125,6 +136,7 @@ class K2ReasoningClient:
                         {
                             "frame_rate": frame_rate,
                             "frame_count": len(preview_frames),
+                            "motion_context": motion_context,
                             "sampled_frames": compact_frames,
                         }
                     ),
@@ -183,6 +195,9 @@ class K2ReasoningClient:
         hip_sway_boost = self._clamp_float(response_payload.get("hip_sway_boost", 1.12), 0.8, 1.8)
         shoulder_sway_boost = self._clamp_float(response_payload.get("shoulder_sway_boost", 1.08), 0.8, 1.8)
         head_bounce_boost = self._clamp_float(response_payload.get("head_bounce_boost", 1.04), 0.8, 1.6)
+        root_motion_boost = self._clamp_float(response_payload.get("root_motion_boost", 1.14), 0.8, 1.8)
+        stance_width_boost = self._clamp_float(response_payload.get("stance_width_boost", 1.1), 0.9, 1.8)
+        jitter_suppression = self._clamp_float(response_payload.get("jitter_suppression", 0.5), 0.0, 1.0)
         smoothing_window = self._clamp_int(response_payload.get("smoothing_window", 3), 1, 7)
         occluded_joint_fills = self._parse_occluded_joint_fills(response_payload.get("occluded_joint_fills", []))
         confidence = str(response_payload.get("confidence", "medium"))
@@ -195,6 +210,9 @@ class K2ReasoningClient:
             hip_sway_boost=hip_sway_boost,
             shoulder_sway_boost=shoulder_sway_boost,
             head_bounce_boost=head_bounce_boost,
+            root_motion_boost=root_motion_boost,
+            stance_width_boost=stance_width_boost,
+            jitter_suppression=jitter_suppression,
             smoothing_window=smoothing_window,
             occluded_joint_fills=occluded_joint_fills,
             confidence=confidence,

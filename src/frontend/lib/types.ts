@@ -35,6 +35,7 @@ export type JobRecord = {
   export_url: string | null;
   preview_frames: PreviewFrame[];
   waveform: number[];
+  motion_context: string | null;
   reasoning_summary: string | null;
   reasoning_actions: string[];
   reasoning_model: string | null;

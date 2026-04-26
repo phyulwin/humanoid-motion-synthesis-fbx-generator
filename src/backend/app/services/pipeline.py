@@ -35,12 +35,15 @@ class MotionPipeline:
     def _process_job(self, job_id: str) -> None:
         # This method executes the full processing flow and updates job status along the way.
         try:
+            current_job = self.store.get_job(job_id)
+            motion_context = self._infer_motion_context(current_job.filename)
             job = self.store.update_job(
                 job_id,
                 stage=JobStage.process,
                 status=JobStatus.processing,
                 progress=10,
                 message="Normalizing uploaded video.",
+                motion_context=motion_context,
                 error=None,
             )
             upload_path = self._resolve_upload_path(job)
@@ -59,13 +62,19 @@ class MotionPipeline:
                 progress=65,
                 message="Running K2 reasoning and building review-ready motion preview.",
             )
-            reasoning_result, reasoning_status = self._run_reasoning(preview_frames, job.settings.frame_rate, occlusion_masks)
+            reasoning_result, reasoning_status = self._run_reasoning(
+                preview_frames,
+                job.settings.frame_rate,
+                motion_context,
+                occlusion_masks,
+            )
             preview_frames = self._repair_occluded_joints(preview_frames, occlusion_masks, reasoning_result)
-            preview_frames = self._apply_reasoning_cleanup(preview_frames, reasoning_result)
+            preview_frames = self._apply_reasoning_cleanup(preview_frames, reasoning_result, motion_context)
             waveform = self._build_waveform(preview_frames)
             motion_payload = {
                 "frame_rate": job.settings.frame_rate,
                 "loop_animation": job.settings.loop_animation,
+                "motion_context": motion_context,
                 "preview_frames": [frame.model_dump(mode="json") for frame in preview_frames],
             }
             self.store.save_job_payload(job.id, "motion.json", motion_payload)
@@ -79,8 +88,9 @@ class MotionPipeline:
                 thumbnail_url=thumbnail_url,
                 preview_frames=preview_frames,
                 waveform=waveform,
+                motion_context=motion_context,
                 reasoning_summary=reasoning_result.summary if reasoning_result else reasoning_status,
-                reasoning_actions=(reasoning_result.actions if reasoning_result else []) + [extraction_status],
+                reasoning_actions=(reasoning_result.actions if reasoning_result else []) + [f"Context: {motion_context}", extraction_status],
                 reasoning_model=self.settings.k2_model_name if reasoning_result else None,
             )
         except Exception as exc:
@@ -216,7 +226,12 @@ class MotionPipeline:
             pass
 
         return (
-            self._generate_fallback_motion(job.settings.frame_rate, job.settings.trim_start, job.settings.trim_end),
+            self._generate_fallback_motion(
+                job.settings.frame_rate,
+                job.settings.trim_start,
+                job.settings.trim_end,
+                self._infer_motion_context(job.filename),
+            ),
             "Pose source: synthetic fallback motion.",
             [],
         )
@@ -304,18 +319,81 @@ class MotionPipeline:
             )
         return normalized
 
-    def _generate_fallback_motion(self, frame_rate: int, trim_start: float, trim_end: float) -> list[PreviewFrame]:
-        # This helper generates a synthetic dance loop so the UI remains demoable without CV dependencies.
+    def _infer_motion_context(self, filename: str) -> str:
+        # This helper infers a pragmatic clip description from the uploaded filename for fallback control and K2 prompting.
+        normalized_name = Path(filename).stem.lower()
+        for separator in ("-", "_", ".", "(", ")", "[", "]"):
+            normalized_name = normalized_name.replace(separator, " ")
+
+        tokens = [token for token in normalized_name.split() if token]
+        motion_label = "general full-body movement"
+        scene_label = "unspecified scene"
+
+        if any(token in {"walk", "walking", "stroll", "streetwalk"} for token in tokens):
+            motion_label = "person walking with alternating grounded steps"
+        elif any(token in {"run", "running", "jog", "jogging", "sprint"} for token in tokens):
+            motion_label = "person running with forward travel"
+        elif any(token in {"dance", "dancing", "freestyle", "choreo", "choreography"} for token in tokens):
+            motion_label = "person dancing with expressive whole-body motion"
+        elif any(token in {"jump", "jumping", "hop", "hopping"} for token in tokens):
+            motion_label = "person jumping with brief airborne phases"
+
+        if any(token in {"outside", "outdoor", "street", "sidewalk", "park", "road"} for token in tokens):
+            scene_label = "outdoor scene"
+        elif any(token in {"inside", "indoor", "studio", "room", "hall"} for token in tokens):
+            scene_label = "indoor scene"
+
+        if scene_label == "unspecified scene":
+            return f"{motion_label} in {scene_label}"
+        return f"{motion_label} in an {scene_label}"
+
+    def _generate_fallback_motion(self, frame_rate: int, trim_start: float, trim_end: float, motion_context: str) -> list[PreviewFrame]:
+        # This helper generates a context-aware synthetic motion clip so the UI remains operational without CV dependencies.
         preview_frames: list[PreviewFrame] = []
         safe_start = max(0.0, float(trim_start or 0.0))
         safe_end = max(safe_start, float(trim_end or safe_start))
         clip_duration = max(0.1, safe_end - safe_start)
         total_frames = max(2, min(48, int(round(clip_duration * max(frame_rate, 1)))))
+        motion_context_lower = motion_context.lower()
+        is_walk_cycle = "walking" in motion_context_lower or "walk" in motion_context_lower
         for index in range(total_frames):
             progress = index / max(total_frames - 1, 1)
             sway = math.sin(progress * math.pi * 4.0)
             lift = math.cos(progress * math.pi * 2.0)
             travel = math.sin(progress * math.pi * 2.0)
+            arm_reach = math.sin(progress * math.pi * 3.0)
+            counter_sway = math.sin((progress * math.pi * 4.0) + 0.6)
+            walk_phase = math.sin(progress * math.pi * 2.0)
+            walk_phase_opposite = math.sin((progress * math.pi * 2.0) + math.pi)
+            if is_walk_cycle:
+                preview_frames.append(
+                    PreviewFrame(
+                        t=round(safe_start + (index / max(frame_rate, 1)), 4),
+                        joints={
+                            "head": JointPoint(x=0.0, y=2.38 + (0.03 * lift), z=0.02 * sway),
+                            "neck": JointPoint(x=0.0, y=1.82, z=0.01 * sway),
+                            "chest": JointPoint(x=0.0, y=1.42 + (0.03 * lift), z=0.04 * sway),
+                            "spine": JointPoint(x=0.0, y=1.05 + (0.02 * lift), z=0.05 * sway),
+                            "left_shoulder": JointPoint(x=-0.62, y=1.72, z=0.01 * sway),
+                            "right_shoulder": JointPoint(x=0.62, y=1.72, z=-0.01 * sway),
+                            "left_elbow": JointPoint(x=-0.92, y=1.18 - (0.1 * walk_phase), z=-0.08 * walk_phase),
+                            "right_elbow": JointPoint(x=0.92, y=1.18 - (0.1 * walk_phase_opposite), z=-0.08 * walk_phase_opposite),
+                            "left_hand": JointPoint(x=-1.16, y=0.84 - (0.22 * walk_phase), z=-0.12 * walk_phase),
+                            "right_hand": JointPoint(x=1.16, y=0.84 - (0.22 * walk_phase_opposite), z=-0.12 * walk_phase_opposite),
+                            "hips": JointPoint(x=0.08 * sway, y=0.72 + (0.04 * lift), z=0.22 * progress),
+                            "left_knee": JointPoint(x=-0.46, y=-0.32 + (0.22 * max(0.0, walk_phase)), z=0.1 * walk_phase),
+                            "right_knee": JointPoint(x=0.46, y=-0.32 + (0.22 * max(0.0, walk_phase_opposite)), z=0.1 * walk_phase_opposite),
+                            "left_foot": JointPoint(x=-0.62, y=-1.46 + (0.18 * max(0.0, walk_phase)), z=0.2 * walk_phase),
+                            "right_foot": JointPoint(x=0.62, y=-1.46 + (0.18 * max(0.0, walk_phase_opposite)), z=0.2 * walk_phase_opposite),
+                            "left_heel": JointPoint(x=-0.52, y=-1.52 + (0.1 * max(0.0, walk_phase)), z=0.12 * walk_phase),
+                            "right_heel": JointPoint(x=0.52, y=-1.52 + (0.1 * max(0.0, walk_phase_opposite)), z=0.12 * walk_phase_opposite),
+                            "left_toe": JointPoint(x=-0.76, y=-1.42 + (0.14 * max(0.0, walk_phase)), z=0.24 * walk_phase),
+                            "right_toe": JointPoint(x=0.76, y=-1.42 + (0.14 * max(0.0, walk_phase_opposite)), z=0.24 * walk_phase_opposite),
+                        },
+                    )
+                )
+                continue
+
             preview_frames.append(
                 PreviewFrame(
                     t=round(safe_start + (index / max(frame_rate, 1)), 4),
@@ -326,19 +404,19 @@ class MotionPipeline:
                         "spine": JointPoint(x=0.0, y=1.1 + (0.06 * lift), z=0.04 * sway),
                         "left_shoulder": JointPoint(x=-0.65, y=1.75, z=0.0),
                         "right_shoulder": JointPoint(x=0.65, y=1.75, z=0.0),
-                        "left_elbow": JointPoint(x=-1.05, y=1.2 + (0.2 * lift), z=0.08),
-                        "right_elbow": JointPoint(x=1.05, y=1.2 - (0.2 * lift), z=-0.08),
-                        "left_hand": JointPoint(x=-1.35, y=0.8 + (0.6 * sway), z=0.18),
-                        "right_hand": JointPoint(x=1.35, y=0.8 - (0.6 * sway), z=-0.18),
-                        "hips": JointPoint(x=0.32 * sway, y=0.7 + (0.12 * lift), z=0.16 * travel),
-                        "left_knee": JointPoint(x=-0.42, y=-0.4 + (0.24 * sway), z=0.06 * travel),
-                        "right_knee": JointPoint(x=0.42, y=-0.4 - (0.24 * sway), z=-0.06 * travel),
-                        "left_foot": JointPoint(x=-0.58, y=-1.5 + (0.05 * lift), z=0.26 * sway),
-                        "right_foot": JointPoint(x=0.58, y=-1.5 - (0.05 * lift), z=-0.26 * sway),
-                        "left_heel": JointPoint(x=-0.5, y=-1.56 + (0.04 * lift), z=0.16 * sway),
-                        "right_heel": JointPoint(x=0.5, y=-1.56 - (0.04 * lift), z=-0.16 * sway),
-                        "left_toe": JointPoint(x=-0.68, y=-1.48 + (0.05 * lift), z=0.38 * sway),
-                        "right_toe": JointPoint(x=0.68, y=-1.48 - (0.05 * lift), z=-0.38 * sway),
+                        "left_elbow": JointPoint(x=-1.08 - (0.1 * arm_reach), y=1.2 + (0.2 * lift), z=0.12 + (0.06 * sway)),
+                        "right_elbow": JointPoint(x=1.08 + (0.1 * arm_reach), y=1.2 - (0.2 * lift), z=-0.12 - (0.06 * sway)),
+                        "left_hand": JointPoint(x=-1.42 - (0.16 * arm_reach), y=0.86 + (0.56 * sway), z=0.24 + (0.1 * counter_sway)),
+                        "right_hand": JointPoint(x=1.42 + (0.16 * arm_reach), y=0.86 - (0.56 * sway), z=-0.24 - (0.1 * counter_sway)),
+                        "hips": JointPoint(x=0.4 * sway, y=0.72 + (0.14 * lift), z=0.22 * travel),
+                        "left_knee": JointPoint(x=-0.56 - (0.06 * sway), y=-0.38 + (0.22 * sway), z=0.1 * travel),
+                        "right_knee": JointPoint(x=0.56 + (0.06 * sway), y=-0.38 - (0.22 * sway), z=-0.1 * travel),
+                        "left_foot": JointPoint(x=-0.74 - (0.08 * sway), y=-1.5 + (0.05 * lift), z=0.3 * sway),
+                        "right_foot": JointPoint(x=0.74 + (0.08 * sway), y=-1.5 - (0.05 * lift), z=-0.3 * sway),
+                        "left_heel": JointPoint(x=-0.58 - (0.06 * sway), y=-1.56 + (0.04 * lift), z=0.18 * sway),
+                        "right_heel": JointPoint(x=0.58 + (0.06 * sway), y=-1.56 - (0.04 * lift), z=-0.18 * sway),
+                        "left_toe": JointPoint(x=-0.82 - (0.08 * sway), y=-1.48 + (0.05 * lift), z=0.42 * sway),
+                        "right_toe": JointPoint(x=0.82 + (0.08 * sway), y=-1.48 - (0.05 * lift), z=-0.42 * sway),
                     },
                 )
             )
@@ -348,6 +426,7 @@ class MotionPipeline:
         self,
         preview_frames: list[PreviewFrame],
         frame_rate: int,
+        motion_context: str,
         occlusion_masks: list[dict[str, bool]],
     ) -> tuple[MotionReasoningResult | None, str]:
         # This helper asks K2 for cleanup policy and falls back quietly if the API is unavailable.
@@ -355,7 +434,7 @@ class MotionPipeline:
             return None, "K2 Think V2 skipped: missing API key or disabled configuration."
 
         try:
-            reasoning_result = self.k2_client.analyze_motion(preview_frames, frame_rate, occlusion_masks)
+            reasoning_result = self.k2_client.analyze_motion(preview_frames, frame_rate, motion_context, occlusion_masks)
             if reasoning_result is None:
                 return None, "K2 Think V2 skipped: no reasoning result returned."
             return reasoning_result, "K2 Think V2 completed."
@@ -470,17 +549,24 @@ class MotionPipeline:
         self,
         preview_frames: list[PreviewFrame],
         reasoning_result: MotionReasoningResult | None,
+        motion_context: str,
     ) -> list[PreviewFrame]:
         # This helper applies deterministic cleanup chosen by K2 so the reasoning model materially affects output.
         if not preview_frames:
             return preview_frames
 
-        arm_boost = reasoning_result.arm_boost if reasoning_result else 1.18
-        leg_boost = reasoning_result.leg_boost if reasoning_result else 1.08
-        hip_sway_boost = reasoning_result.hip_sway_boost if reasoning_result else 1.1
-        shoulder_sway_boost = reasoning_result.shoulder_sway_boost if reasoning_result else 1.08
-        head_bounce_boost = reasoning_result.head_bounce_boost if reasoning_result else 1.04
-        smoothing_window = reasoning_result.smoothing_window if reasoning_result else 3
+        motion_context_lower = motion_context.lower()
+        is_walk_cycle = "walking" in motion_context_lower or "walk" in motion_context_lower
+
+        arm_boost = reasoning_result.arm_boost if reasoning_result else (1.0 if is_walk_cycle else 1.18)
+        leg_boost = reasoning_result.leg_boost if reasoning_result else (1.02 if is_walk_cycle else 1.08)
+        hip_sway_boost = reasoning_result.hip_sway_boost if reasoning_result else (0.96 if is_walk_cycle else 1.1)
+        shoulder_sway_boost = reasoning_result.shoulder_sway_boost if reasoning_result else (1.0 if is_walk_cycle else 1.08)
+        head_bounce_boost = reasoning_result.head_bounce_boost if reasoning_result else (1.0 if is_walk_cycle else 1.04)
+        root_motion_boost = reasoning_result.root_motion_boost if reasoning_result else (1.26 if is_walk_cycle else 1.14)
+        stance_width_boost = reasoning_result.stance_width_boost if reasoning_result else (1.05 if is_walk_cycle else 1.12)
+        jitter_suppression = reasoning_result.jitter_suppression if reasoning_result else (0.72 if is_walk_cycle else 0.5)
+        smoothing_window = reasoning_result.smoothing_window if reasoning_result else (4 if is_walk_cycle else 3)
 
         enhanced_frames: list[PreviewFrame] = []
         for frame in preview_frames:
@@ -502,10 +588,18 @@ class MotionPipeline:
                     x_value *= leg_boost
                     z_value *= leg_boost
 
+                if joint_name in {"left_heel", "right_heel", "left_toe", "right_toe"}:
+                    x_value *= max(leg_boost, stance_width_boost)
+                    z_value *= leg_boost
+
                 if joint_name == "hips":
-                    x_value *= hip_sway_boost
+                    x_value *= max(hip_sway_boost, root_motion_boost)
                     y_value = ((y_value - 0.7) * max(1.0, hip_sway_boost * 0.9)) + 0.7
-                    z_value *= max(1.0, hip_sway_boost * 0.85)
+                    z_value *= max(1.0, root_motion_boost)
+
+                if joint_name in {"spine", "chest", "neck", "head"}:
+                    x_value *= max(1.0, root_motion_boost * 0.55)
+                    z_value *= max(1.0, root_motion_boost * 0.65)
 
                 if joint_name == "head":
                     y_value *= head_bounce_boost
@@ -519,7 +613,106 @@ class MotionPipeline:
 
             enhanced_frames.append(PreviewFrame(t=frame.t, joints=updated_joints))
 
-        return self._smooth_frames(enhanced_frames, smoothing_window)
+        smoothed_frames = self._smooth_frames(enhanced_frames, smoothing_window)
+        stable_frames = self._stabilize_joint_velocity(smoothed_frames, jitter_suppression)
+        return self._enforce_body_mechanics(stable_frames, stance_width_boost)
+
+    def _stabilize_joint_velocity(self, preview_frames: list[PreviewFrame], jitter_suppression: float) -> list[PreviewFrame]:
+        # This helper limits abrupt frame-to-frame joint jumps that read as vibration in the preview rig.
+        if len(preview_frames) < 2 or jitter_suppression <= 0:
+            return preview_frames
+
+        limited_frames: list[PreviewFrame] = [preview_frames[0]]
+        hand_delta_limit = 0.2 - (0.08 * min(1.0, jitter_suppression))
+        body_delta_limit = 0.26 - (0.08 * min(1.0, jitter_suppression))
+
+        for frame in preview_frames[1:]:
+            previous_frame = limited_frames[-1]
+            stabilized_joints: dict[str, JointPoint] = {}
+            for joint_name, joint in frame.joints.items():
+                previous_joint = previous_frame.joints[joint_name]
+                delta_limit = hand_delta_limit if "hand" in joint_name else body_delta_limit
+                x_value = self._clamp_delta(previous_joint.x, joint.x, delta_limit)
+                y_value = self._clamp_delta(previous_joint.y, joint.y, delta_limit)
+                z_value = self._clamp_delta(previous_joint.z, joint.z, delta_limit)
+                stabilized_joints[joint_name] = JointPoint(
+                    x=round(x_value, 4),
+                    y=round(y_value, 4),
+                    z=round(z_value, 4),
+                )
+            limited_frames.append(PreviewFrame(t=frame.t, joints=stabilized_joints))
+
+        return limited_frames
+
+    def _enforce_body_mechanics(self, preview_frames: list[PreviewFrame], stance_width_boost: float) -> list[PreviewFrame]:
+        # This helper keeps the body anatomically readable by maintaining leg spread and grounded lower-body structure.
+        corrected_frames: list[PreviewFrame] = []
+        minimum_knee_spread = 0.92 * stance_width_boost
+        minimum_foot_spread = 1.18 * stance_width_boost
+        minimum_toe_spread = 1.3 * stance_width_boost
+
+        for frame in preview_frames:
+            joints = dict(frame.joints)
+            hips = joints["hips"]
+            left_knee, right_knee = self._spread_pair(joints["left_knee"], joints["right_knee"], minimum_knee_spread)
+            left_foot, right_foot = self._spread_pair(joints["left_foot"], joints["right_foot"], minimum_foot_spread)
+            left_heel, right_heel = self._spread_pair(joints["left_heel"], joints["right_heel"], minimum_foot_spread * 0.82)
+            left_toe, right_toe = self._spread_pair(joints["left_toe"], joints["right_toe"], minimum_toe_spread)
+
+            left_knee = JointPoint(
+                x=left_knee.x,
+                y=min(left_knee.y, hips.y - 0.58),
+                z=left_knee.z,
+            )
+            right_knee = JointPoint(
+                x=right_knee.x,
+                y=min(right_knee.y, hips.y - 0.58),
+                z=right_knee.z,
+            )
+            left_foot = JointPoint(
+                x=left_foot.x,
+                y=min(left_foot.y, left_knee.y - 0.65),
+                z=left_foot.z,
+            )
+            right_foot = JointPoint(
+                x=right_foot.x,
+                y=min(right_foot.y, right_knee.y - 0.65),
+                z=right_foot.z,
+            )
+
+            joints["left_knee"] = left_knee
+            joints["right_knee"] = right_knee
+            joints["left_foot"] = left_foot
+            joints["right_foot"] = right_foot
+            joints["left_heel"] = left_heel
+            joints["right_heel"] = right_heel
+            joints["left_toe"] = left_toe
+            joints["right_toe"] = right_toe
+            corrected_frames.append(PreviewFrame(t=frame.t, joints=joints))
+
+        return corrected_frames
+
+    def _spread_pair(self, left_joint: JointPoint, right_joint: JointPoint, minimum_distance: float) -> tuple[JointPoint, JointPoint]:
+        # This helper keeps left and right joints separated along the lateral axis to prevent limb collapse.
+        current_distance = right_joint.x - left_joint.x
+        if current_distance >= minimum_distance:
+            return left_joint, right_joint
+
+        midpoint = (left_joint.x + right_joint.x) / 2.0
+        half_width = minimum_distance / 2.0
+        return (
+            JointPoint(x=round(midpoint - half_width, 4), y=left_joint.y, z=left_joint.z),
+            JointPoint(x=round(midpoint + half_width, 4), y=right_joint.y, z=right_joint.z),
+        )
+
+    def _clamp_delta(self, previous_value: float, next_value: float, delta_limit: float) -> float:
+        # This helper constrains sudden value changes while preserving the dominant motion trend.
+        delta = next_value - previous_value
+        if delta > delta_limit:
+            return previous_value + delta_limit
+        if delta < -delta_limit:
+            return previous_value - delta_limit
+        return next_value
 
     def _smooth_frames(self, preview_frames: list[PreviewFrame], window_size: int) -> list[PreviewFrame]:
         # This helper applies moving-average smoothing to reduce jitter after amplitude corrections.

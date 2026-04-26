@@ -68,6 +68,7 @@ class JobRecord(BaseModel):
     export_url: str | None = None
     preview_frames: list[PreviewFrame] = Field(default_factory=list)
     waveform: list[float] = Field(default_factory=list)
+    motion_context: str | None = None
     reasoning_summary: str | None = None
     reasoning_actions: list[str] = Field(default_factory=list)
     reasoning_model: str | None = None
