@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 import AvatarPreview from "@/components/avatar-preview";
 import { createJob, fetchJob, requestExport, resolveFileUrl } from "@/lib/api";
-import type { JobRecord } from "@/lib/types";
+import type { JobRecord, PreviewFrame } from "@/lib/types";
 
 type UploadSettings = {
   avatarRig: string;
@@ -32,6 +32,8 @@ export default function StudioDashboard() {
   const [environmentPreset, setEnvironmentPreset] = useState(ENVIRONMENT_PRESETS[0]);
   const [lightingPreset, setLightingPreset] = useState(LIGHTING_PRESETS[0]);
   const [avatarVariant, setAvatarVariant] = useState(AVATAR_VARIANTS[0]);
+  const [activePreviewFrame, setActivePreviewFrame] = useState<PreviewFrame | null>(null);
+  const [activePreviewFrameIndex, setActivePreviewFrameIndex] = useState(0);
   const [settings, setSettings] = useState<UploadSettings>({
     avatarRig: "Mixamo Standard",
     frameRate: 30,
@@ -155,6 +157,14 @@ export default function StudioDashboard() {
       return AVATAR_VARIANTS[nextIndex];
     });
   }
+
+  function handlePreviewFrameChange(frame: PreviewFrame, frameIndex: number) {
+    // This handler stores the current preview frame so coordinates can be inspected live in the dashboard.
+    setActivePreviewFrame(frame);
+    setActivePreviewFrameIndex(frameIndex);
+  }
+
+  const displayedJoints = activePreviewFrame?.joints ?? job?.preview_frames?.[0]?.joints ?? null;
 
   return (
     <main className="min-h-screen p-4 md:p-6">
@@ -359,8 +369,50 @@ export default function StudioDashboard() {
                 frames={job?.preview_frames || []}
                 lightingPreset={lightingPreset}
                 loopAnimation={settings.loopAnimation}
+                onFrameChange={handlePreviewFrameChange}
                 waveform={job?.waveform || []}
               />
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.7fr),minmax(280px,1fr)]">
+                {job?.reasoning_summary ? (
+                  <section className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/80">
+                    <div className="mb-2 text-xs uppercase tracking-[0.22em] text-white/45">
+                      {job.reasoning_model || "Reasoning Layer"}
+                    </div>
+                    <div>{job.reasoning_summary}</div>
+                    {job.reasoning_actions.length ? (
+                      <div className="mt-2 text-xs text-white/55">
+                        {job.reasoning_actions.join(" | ")}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                <section
+                  className={`rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs text-white/70 ${
+                    job?.reasoning_summary ? "" : "xl:col-start-1"
+                  }`}
+                >
+                  <div className="mb-4 text-xs uppercase tracking-[0.28em] text-white/55">Motion Coordinates</div>
+                  <div className="mb-3 flex items-center justify-between">
+                    <span>Frame {activePreviewFrameIndex + 1}</span>
+                    <span>{activePreviewFrame ? `${activePreviewFrame.t.toFixed(2)}s` : "No frame"}</span>
+                  </div>
+                  {displayedJoints ? (
+                    <div className="fine-scrollbar max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                      {Object.entries(displayedJoints).map(([jointName, joint]) => (
+                        <div key={jointName} className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
+                          <div className="mb-1 uppercase tracking-[0.18em] text-white/45">{jointName}</div>
+                          <div>
+                            x {joint.x.toFixed(2)} | y {joint.y.toFixed(2)} | z {joint.z.toFixed(2)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-white/45">Generate motion to inspect joint coordinates.</div>
+                  )}
+                </section>
+              </div>
               {error ? (
                 <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {error}
@@ -369,19 +421,6 @@ export default function StudioDashboard() {
               {job?.error ? (
                 <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {job.error}
-                </div>
-              ) : null}
-              {job?.reasoning_summary ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/80">
-                  <div className="mb-2 text-xs uppercase tracking-[0.22em] text-white/45">
-                    {job.reasoning_model || "Reasoning Layer"}
-                  </div>
-                  <div>{job.reasoning_summary}</div>
-                  {job.reasoning_actions.length ? (
-                    <div className="mt-2 text-xs text-white/55">
-                      {job.reasoning_actions.join(" | ")}
-                    </div>
-                  ) : null}
                 </div>
               ) : null}
             </section>

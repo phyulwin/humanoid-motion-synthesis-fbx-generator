@@ -21,6 +21,7 @@ class MotionReasoningResult:
     shoulder_sway_boost: float
     head_bounce_boost: float
     smoothing_window: int
+    occluded_joint_fills: dict[int, dict[str, dict[str, float]]]
     confidence: str
     raw_response: str
 
@@ -35,12 +36,17 @@ class K2ReasoningClient:
         # This method returns True only when the K2 integration is configured for execution.
         return self.settings.k2_enabled and bool(self.settings.k2_api_key.strip())
 
-    def analyze_motion(self, preview_frames: list[PreviewFrame], frame_rate: int) -> MotionReasoningResult | None:
+    def analyze_motion(
+        self,
+        preview_frames: list[PreviewFrame],
+        frame_rate: int,
+        occlusion_masks: list[dict[str, bool]] | None = None,
+    ) -> MotionReasoningResult | None:
         # This method submits a compact motion sample to K2 Think V2 and returns parsed cleanup directives.
         if not self.is_enabled() or not preview_frames:
             return None
 
-        payload = self._build_payload(preview_frames, frame_rate)
+        payload = self._build_payload(preview_frames, frame_rate, occlusion_masks or [])
         headers = {
             "accept": "application/json",
             "Authorization": f"Bearer {self.settings.k2_api_key}",
@@ -55,14 +61,24 @@ class K2ReasoningClient:
         content = self._extract_message_content(response_json)
         return self._parse_reasoning(content)
 
-    def _build_payload(self, preview_frames: list[PreviewFrame], frame_rate: int) -> dict:
+    def _build_payload(
+        self,
+        preview_frames: list[PreviewFrame],
+        frame_rate: int,
+        occlusion_masks: list[dict[str, bool]],
+    ) -> dict:
         # This method builds a small JSON prompt that keeps K2 focused on correction policy rather than raw inference.
         sampled_frames = self._sample_frames(preview_frames)
         compact_frames = []
-        for frame in sampled_frames:
+        for source_frame_index, frame in sampled_frames:
+            occluded_joints = []
+            if 0 <= source_frame_index < len(occlusion_masks):
+                occluded_joints = [joint_name for joint_name, is_occluded in occlusion_masks[source_frame_index].items() if is_occluded]
             compact_frames.append(
                 {
+                    "source_frame_index": source_frame_index,
                     "t": frame.t,
+                    "occluded_joints": occluded_joints,
                     "joints": {
                         name: {
                             "x": round(joint.x, 3),
@@ -78,6 +94,7 @@ class K2ReasoningClient:
             "You are reviewing dance motion data for humanoid FBX export. "
             "Return strict JSON only. "
             "Decide how to improve readability of arms, legs, torso sway, shoulder sway, head bounce, and temporal smoothness. "
+            "When some limbs are occluded or out of frame, infer plausible joint coordinates from surrounding frames and bilateral body context. "
             "Do not invent new joints. "
             "JSON schema: "
             "{\"summary\": string, "
@@ -88,6 +105,7 @@ class K2ReasoningClient:
             "\"shoulder_sway_boost\": number between 0.8 and 1.8, "
             "\"head_bounce_boost\": number between 0.8 and 1.6, "
             "\"smoothing_window\": integer between 1 and 7, "
+            "\"occluded_joint_fills\": [{\"source_frame_index\": integer, \"joints\": {\"joint_name\": {\"x\": number, \"y\": number, \"z\": number}}}], "
             "\"confidence\": \"low\"|\"medium\"|\"high\"}."
         )
 
@@ -114,12 +132,12 @@ class K2ReasoningClient:
             ],
         }
 
-    def _sample_frames(self, preview_frames: list[PreviewFrame]) -> list[PreviewFrame]:
+    def _sample_frames(self, preview_frames: list[PreviewFrame]) -> list[tuple[int, PreviewFrame]]:
         # This method reduces the motion sequence to a manageable sample for reasoning.
         if len(preview_frames) <= 8:
-            return preview_frames
+            return [(index, frame) for index, frame in enumerate(preview_frames)]
         step = max(1, len(preview_frames) // 8)
-        sampled = [preview_frames[index] for index in range(0, len(preview_frames), step)]
+        sampled = [(index, preview_frames[index]) for index in range(0, len(preview_frames), step)]
         return sampled[:8]
 
     def _extract_message_content(self, response_json: dict) -> str:
@@ -166,6 +184,7 @@ class K2ReasoningClient:
         shoulder_sway_boost = self._clamp_float(response_payload.get("shoulder_sway_boost", 1.08), 0.8, 1.8)
         head_bounce_boost = self._clamp_float(response_payload.get("head_bounce_boost", 1.04), 0.8, 1.6)
         smoothing_window = self._clamp_int(response_payload.get("smoothing_window", 3), 1, 7)
+        occluded_joint_fills = self._parse_occluded_joint_fills(response_payload.get("occluded_joint_fills", []))
         confidence = str(response_payload.get("confidence", "medium"))
 
         return MotionReasoningResult(
@@ -177,9 +196,44 @@ class K2ReasoningClient:
             shoulder_sway_boost=shoulder_sway_boost,
             head_bounce_boost=head_bounce_boost,
             smoothing_window=smoothing_window,
+            occluded_joint_fills=occluded_joint_fills,
             confidence=confidence,
             raw_response=content,
         )
+
+    def _parse_occluded_joint_fills(self, raw_fills) -> dict[int, dict[str, dict[str, float]]]:
+        # This method normalizes K2 occlusion repair output into a frame-indexed joint dictionary.
+        normalized_fills: dict[int, dict[str, dict[str, float]]] = {}
+        if not isinstance(raw_fills, list):
+            return normalized_fills
+
+        for item in raw_fills:
+            if not isinstance(item, dict):
+                continue
+            source_frame_index = item.get("source_frame_index")
+            try:
+                normalized_index = int(source_frame_index)
+            except (TypeError, ValueError):
+                continue
+
+            raw_joints = item.get("joints", {})
+            if not isinstance(raw_joints, dict):
+                continue
+
+            normalized_joints: dict[str, dict[str, float]] = {}
+            for joint_name, joint_value in raw_joints.items():
+                if not isinstance(joint_value, dict):
+                    continue
+                normalized_joints[str(joint_name)] = {
+                    "x": self._clamp_float(joint_value.get("x", 0.0), -6.0, 6.0),
+                    "y": self._clamp_float(joint_value.get("y", 0.0), -6.0, 6.0),
+                    "z": self._clamp_float(joint_value.get("z", 0.0), -6.0, 6.0),
+                }
+
+            if normalized_joints:
+                normalized_fills[normalized_index] = normalized_joints
+
+        return normalized_fills
 
     def _clamp_float(self, value, minimum: float, maximum: float) -> float:
         # This method normalizes numeric floats within a safe range.

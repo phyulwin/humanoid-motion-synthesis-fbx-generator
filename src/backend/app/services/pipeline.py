@@ -52,14 +52,15 @@ class MotionPipeline:
                 message="Extracting pose landmarks from motion clip.",
             )
             thumbnail_url = self._extract_thumbnail(job.id, normalized_path)
-            preview_frames, extraction_status = self._extract_pose_preview(job, normalized_path)
+            preview_frames, extraction_status, occlusion_masks = self._extract_pose_preview(job, normalized_path)
 
             self.store.update_job(
                 job_id,
                 progress=65,
                 message="Running K2 reasoning and building review-ready motion preview.",
             )
-            reasoning_result, reasoning_status = self._run_reasoning(preview_frames, job.settings.frame_rate)
+            reasoning_result, reasoning_status = self._run_reasoning(preview_frames, job.settings.frame_rate, occlusion_masks)
+            preview_frames = self._repair_occluded_joints(preview_frames, occlusion_masks, reasoning_result)
             preview_frames = self._apply_reasoning_cleanup(preview_frames, reasoning_result)
             waveform = self._build_waveform(preview_frames)
             motion_payload = {
@@ -151,7 +152,7 @@ class MotionPipeline:
         except Exception:
             return None
 
-    def _extract_pose_preview(self, job: JobRecord, video_path: Path) -> tuple[list[PreviewFrame], str]:
+    def _extract_pose_preview(self, job: JobRecord, video_path: Path) -> tuple[list[PreviewFrame], str, list[dict[str, bool]]]:
         # This helper builds preview frames from MediaPipe when possible and falls back to synthetic motion otherwise.
         try:
             import cv2
@@ -169,6 +170,7 @@ class MotionPipeline:
                 enable_segmentation=False,
             )
             extracted_frames: list[PreviewFrame] = []
+            occlusion_masks: list[dict[str, bool]] = []
             frame_index = 0
 
             while capture.isOpened():
@@ -189,6 +191,9 @@ class MotionPipeline:
                             joints=normalized,
                         )
                     )
+                    occlusion_masks.append(
+                        self._build_occlusion_mask(result.pose_landmarks.landmark if result.pose_landmarks else result.pose_world_landmarks.landmark)
+                    )
                 elif result.pose_landmarks:
                     normalized = self._normalize_landmarks(result.pose_landmarks.landmark, use_world_space=False)
                     extracted_frames.append(
@@ -197,6 +202,7 @@ class MotionPipeline:
                             joints=normalized,
                         )
                     )
+                    occlusion_masks.append(self._build_occlusion_mask(result.pose_landmarks.landmark))
                 frame_index += 1
                 if len(extracted_frames) >= max_frames:
                     break
@@ -205,14 +211,45 @@ class MotionPipeline:
             pose.close()
 
             if extracted_frames:
-                return extracted_frames, "Pose source: MediaPipe extraction."
+                return extracted_frames, "Pose source: MediaPipe extraction.", occlusion_masks
         except Exception:
             pass
 
         return (
             self._generate_fallback_motion(job.settings.frame_rate, job.settings.trim_start, job.settings.trim_end),
             "Pose source: synthetic fallback motion.",
+            [],
         )
+
+    def _build_occlusion_mask(self, landmarks) -> dict[str, bool]:
+        # This helper flags joints with weak visibility so they can be repaired from context.
+        def visibility(index: int) -> float:
+            selected = landmarks[index]
+            return float(getattr(selected, "visibility", 1.0))
+
+        visibility_threshold = 0.55
+        joint_visibility = {
+            "head": visibility(0),
+            "neck": (visibility(11) + visibility(12)) / 2.0,
+            "chest": (visibility(11) + visibility(12) + visibility(23) + visibility(24)) / 4.0,
+            "spine": (visibility(11) + visibility(12) + visibility(23) + visibility(24)) / 4.0,
+            "left_shoulder": visibility(11),
+            "right_shoulder": visibility(12),
+            "left_elbow": visibility(13),
+            "right_elbow": visibility(14),
+            "left_hand": visibility(15),
+            "right_hand": visibility(16),
+            "hips": (visibility(23) + visibility(24)) / 2.0,
+            "left_knee": visibility(25),
+            "right_knee": visibility(26),
+            "left_foot": visibility(27),
+            "right_foot": visibility(28),
+            "left_heel": visibility(29),
+            "right_heel": visibility(30),
+            "left_toe": visibility(31),
+            "right_toe": visibility(32),
+        }
+        return {joint_name: visibility_value < visibility_threshold for joint_name, visibility_value in joint_visibility.items()}
 
     def _normalize_landmarks(self, landmarks, use_world_space: bool) -> dict[str, JointPoint]:
         # This helper converts MediaPipe landmarks into a smaller normalized humanoid joint set.
@@ -226,6 +263,8 @@ class MotionPipeline:
         left_shoulder = point(11)
         right_shoulder = point(12)
         neck = (left_shoulder + right_shoulder) / 2.0
+        spine = (hips + neck) / 2.0
+        chest = (spine + neck) / 2.0
         scale = np.linalg.norm(left_shoulder - right_shoulder)
         if scale <= 0.0001:
             scale = 0.25
@@ -233,6 +272,8 @@ class MotionPipeline:
         joint_lookup = {
             "head": point(0),
             "neck": neck,
+            "chest": chest,
+            "spine": spine,
             "left_shoulder": left_shoulder,
             "right_shoulder": right_shoulder,
             "left_elbow": point(13),
@@ -244,6 +285,10 @@ class MotionPipeline:
             "right_knee": point(26),
             "left_foot": point(27),
             "right_foot": point(28),
+            "left_heel": point(29),
+            "right_heel": point(30),
+            "left_toe": point(31),
+            "right_toe": point(32),
         }
 
         normalized: dict[str, JointPoint] = {}
@@ -270,23 +315,30 @@ class MotionPipeline:
             progress = index / max(total_frames - 1, 1)
             sway = math.sin(progress * math.pi * 4.0)
             lift = math.cos(progress * math.pi * 2.0)
+            travel = math.sin(progress * math.pi * 2.0)
             preview_frames.append(
                 PreviewFrame(
                     t=round(safe_start + (index / max(frame_rate, 1)), 4),
                     joints={
                         "head": JointPoint(x=0.0, y=2.4 + (lift * 0.08), z=0.05 * sway),
                         "neck": JointPoint(x=0.0, y=1.85, z=0.0),
+                        "chest": JointPoint(x=0.0, y=1.45 + (0.08 * lift), z=0.05 * sway),
+                        "spine": JointPoint(x=0.0, y=1.1 + (0.06 * lift), z=0.04 * sway),
                         "left_shoulder": JointPoint(x=-0.65, y=1.75, z=0.0),
                         "right_shoulder": JointPoint(x=0.65, y=1.75, z=0.0),
                         "left_elbow": JointPoint(x=-1.05, y=1.2 + (0.2 * lift), z=0.08),
                         "right_elbow": JointPoint(x=1.05, y=1.2 - (0.2 * lift), z=-0.08),
                         "left_hand": JointPoint(x=-1.35, y=0.8 + (0.6 * sway), z=0.18),
                         "right_hand": JointPoint(x=1.35, y=0.8 - (0.6 * sway), z=-0.18),
-                        "hips": JointPoint(x=0.18 * sway, y=0.7, z=0.0),
-                        "left_knee": JointPoint(x=-0.4, y=-0.4 + (0.18 * sway), z=0.0),
-                        "right_knee": JointPoint(x=0.4, y=-0.4 - (0.18 * sway), z=0.0),
-                        "left_foot": JointPoint(x=-0.55, y=-1.5, z=0.18 * sway),
-                        "right_foot": JointPoint(x=0.55, y=-1.5, z=-0.18 * sway),
+                        "hips": JointPoint(x=0.32 * sway, y=0.7 + (0.12 * lift), z=0.16 * travel),
+                        "left_knee": JointPoint(x=-0.42, y=-0.4 + (0.24 * sway), z=0.06 * travel),
+                        "right_knee": JointPoint(x=0.42, y=-0.4 - (0.24 * sway), z=-0.06 * travel),
+                        "left_foot": JointPoint(x=-0.58, y=-1.5 + (0.05 * lift), z=0.26 * sway),
+                        "right_foot": JointPoint(x=0.58, y=-1.5 - (0.05 * lift), z=-0.26 * sway),
+                        "left_heel": JointPoint(x=-0.5, y=-1.56 + (0.04 * lift), z=0.16 * sway),
+                        "right_heel": JointPoint(x=0.5, y=-1.56 - (0.04 * lift), z=-0.16 * sway),
+                        "left_toe": JointPoint(x=-0.68, y=-1.48 + (0.05 * lift), z=0.38 * sway),
+                        "right_toe": JointPoint(x=0.68, y=-1.48 - (0.05 * lift), z=-0.38 * sway),
                     },
                 )
             )
@@ -296,18 +348,123 @@ class MotionPipeline:
         self,
         preview_frames: list[PreviewFrame],
         frame_rate: int,
+        occlusion_masks: list[dict[str, bool]],
     ) -> tuple[MotionReasoningResult | None, str]:
         # This helper asks K2 for cleanup policy and falls back quietly if the API is unavailable.
         if not self.k2_client.is_enabled():
             return None, "K2 Think V2 skipped: missing API key or disabled configuration."
 
         try:
-            reasoning_result = self.k2_client.analyze_motion(preview_frames, frame_rate)
+            reasoning_result = self.k2_client.analyze_motion(preview_frames, frame_rate, occlusion_masks)
             if reasoning_result is None:
                 return None, "K2 Think V2 skipped: no reasoning result returned."
             return reasoning_result, "K2 Think V2 completed."
         except Exception as exc:
             return None, f"K2 Think V2 failed: {exc}"
+
+    def _repair_occluded_joints(
+        self,
+        preview_frames: list[PreviewFrame],
+        occlusion_masks: list[dict[str, bool]],
+        reasoning_result: MotionReasoningResult | None,
+    ) -> list[PreviewFrame]:
+        # This helper replaces low-visibility joints using K2 fills first, then temporal or mirrored fallback.
+        if not preview_frames or not occlusion_masks:
+            return preview_frames
+
+        repaired_frames: list[PreviewFrame] = []
+        mirror_joint_map = {
+            "left_shoulder": "right_shoulder",
+            "right_shoulder": "left_shoulder",
+            "left_elbow": "right_elbow",
+            "right_elbow": "left_elbow",
+            "left_hand": "right_hand",
+            "right_hand": "left_hand",
+            "left_knee": "right_knee",
+            "right_knee": "left_knee",
+            "left_foot": "right_foot",
+            "right_foot": "left_foot",
+            "left_heel": "right_heel",
+            "right_heel": "left_heel",
+            "left_toe": "right_toe",
+            "right_toe": "left_toe",
+        }
+
+        for frame_index, frame in enumerate(preview_frames):
+            updated_joints = dict(frame.joints)
+            occlusion_mask = occlusion_masks[frame_index] if frame_index < len(occlusion_masks) else {}
+            for joint_name, is_occluded in occlusion_mask.items():
+                if not is_occluded:
+                    continue
+
+                replacement_joint = self._resolve_joint_fill(
+                    preview_frames,
+                    frame_index,
+                    joint_name,
+                    mirror_joint_map,
+                    reasoning_result,
+                )
+                if replacement_joint is not None:
+                    updated_joints[joint_name] = replacement_joint
+
+            repaired_frames.append(PreviewFrame(t=frame.t, joints=updated_joints))
+
+        return repaired_frames
+
+    def _resolve_joint_fill(
+        self,
+        preview_frames: list[PreviewFrame],
+        frame_index: int,
+        joint_name: str,
+        mirror_joint_map: dict[str, str],
+        reasoning_result: MotionReasoningResult | None,
+    ) -> JointPoint | None:
+        # This helper fills an occluded joint from K2 output, temporal neighbors, or mirrored body context.
+        if reasoning_result and frame_index in reasoning_result.occluded_joint_fills:
+            frame_fills = reasoning_result.occluded_joint_fills[frame_index]
+            if joint_name in frame_fills:
+                joint_fill = frame_fills[joint_name]
+                return JointPoint(x=round(joint_fill["x"], 4), y=round(joint_fill["y"], 4), z=round(joint_fill["z"], 4))
+
+        previous_joint = None
+        next_joint = None
+
+        for candidate_index in range(frame_index - 1, -1, -1):
+            candidate_joint = preview_frames[candidate_index].joints.get(joint_name)
+            if candidate_joint is not None:
+                previous_joint = candidate_joint
+                break
+
+        for candidate_index in range(frame_index + 1, len(preview_frames)):
+            candidate_joint = preview_frames[candidate_index].joints.get(joint_name)
+            if candidate_joint is not None:
+                next_joint = candidate_joint
+                break
+
+        if previous_joint and next_joint:
+            return JointPoint(
+                x=round((previous_joint.x + next_joint.x) / 2.0, 4),
+                y=round((previous_joint.y + next_joint.y) / 2.0, 4),
+                z=round((previous_joint.z + next_joint.z) / 2.0, 4),
+            )
+
+        if previous_joint:
+            return previous_joint
+
+        if next_joint:
+            return next_joint
+
+        mirrored_joint_name = mirror_joint_map.get(joint_name)
+        if mirrored_joint_name:
+            mirrored_joint = preview_frames[frame_index].joints.get(mirrored_joint_name)
+            if mirrored_joint is not None:
+                return JointPoint(
+                    x=round(-mirrored_joint.x, 4),
+                    y=round(mirrored_joint.y, 4),
+                    z=round(mirrored_joint.z, 4),
+                )
+
+        return None
 
     def _apply_reasoning_cleanup(
         self,
@@ -347,6 +504,8 @@ class MotionPipeline:
 
                 if joint_name == "hips":
                     x_value *= hip_sway_boost
+                    y_value = ((y_value - 0.7) * max(1.0, hip_sway_boost * 0.9)) + 0.7
+                    z_value *= max(1.0, hip_sway_boost * 0.85)
 
                 if joint_name == "head":
                     y_value *= head_bounce_boost

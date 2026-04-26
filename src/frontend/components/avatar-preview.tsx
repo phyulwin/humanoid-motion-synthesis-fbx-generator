@@ -18,34 +18,73 @@ type AvatarPreviewProps = {
   environmentPreset: string;
   lightingPreset: string;
   avatarVariant: string;
+  onFrameChange?: (frame: PreviewFrame, frameIndex: number) => void;
 };
 
 type BoneMap = {
   hips?: THREE.Bone;
   spine?: THREE.Bone;
+  chest?: THREE.Bone;
+  neck?: THREE.Bone;
   head?: THREE.Bone;
+  leftShoulder?: THREE.Bone;
+  rightShoulder?: THREE.Bone;
   leftArm?: THREE.Bone;
   leftForeArm?: THREE.Bone;
+  leftHand?: THREE.Bone;
   rightArm?: THREE.Bone;
   rightForeArm?: THREE.Bone;
+  rightHand?: THREE.Bone;
   leftUpLeg?: THREE.Bone;
   leftLeg?: THREE.Bone;
+  leftFoot?: THREE.Bone;
   rightUpLeg?: THREE.Bone;
   rightLeg?: THREE.Bone;
+  rightFoot?: THREE.Bone;
 };
 
 type BonePoseMap = {
   hipsPosition?: THREE.Vector3;
+  hipsQuaternion?: THREE.Quaternion;
   spineQuaternion?: THREE.Quaternion;
+  chestQuaternion?: THREE.Quaternion;
+  neckQuaternion?: THREE.Quaternion;
   headQuaternion?: THREE.Quaternion;
+  leftShoulderQuaternion?: THREE.Quaternion;
+  rightShoulderQuaternion?: THREE.Quaternion;
   leftArmQuaternion?: THREE.Quaternion;
   leftForeArmQuaternion?: THREE.Quaternion;
+  leftHandQuaternion?: THREE.Quaternion;
   rightArmQuaternion?: THREE.Quaternion;
   rightForeArmQuaternion?: THREE.Quaternion;
+  rightHandQuaternion?: THREE.Quaternion;
   leftUpLegQuaternion?: THREE.Quaternion;
   leftLegQuaternion?: THREE.Quaternion;
+  leftFootQuaternion?: THREE.Quaternion;
   rightUpLegQuaternion?: THREE.Quaternion;
   rightLegQuaternion?: THREE.Quaternion;
+  rightFootQuaternion?: THREE.Quaternion;
+};
+
+type BoneRestMap = {
+  spineDirection?: THREE.Vector3;
+  chestDirection?: THREE.Vector3;
+  neckDirection?: THREE.Vector3;
+  headDirection?: THREE.Vector3;
+  leftShoulderDirection?: THREE.Vector3;
+  rightShoulderDirection?: THREE.Vector3;
+  leftArmDirection?: THREE.Vector3;
+  rightArmDirection?: THREE.Vector3;
+  leftForeArmDirection?: THREE.Vector3;
+  rightForeArmDirection?: THREE.Vector3;
+  leftHandDirection?: THREE.Vector3;
+  rightHandDirection?: THREE.Vector3;
+  leftUpLegDirection?: THREE.Vector3;
+  rightUpLegDirection?: THREE.Vector3;
+  leftLegDirection?: THREE.Vector3;
+  rightLegDirection?: THREE.Vector3;
+  leftFootDirection?: THREE.Vector3;
+  rightFootDirection?: THREE.Vector3;
 };
 
 type EnvironmentStyle = {
@@ -185,15 +224,24 @@ function toVector3(joint?: { x: number; y: number; z: number }): THREE.Vector3 {
   return new THREE.Vector3(joint?.x ?? 0, joint?.y ?? 0, joint?.z ?? 0);
 }
 
-function limbAngles(startJoint: THREE.Vector3, endJoint: THREE.Vector3): { pitch: number; roll: number } {
-  // This helper converts a pair of joints into simple limb angles for the rig.
-  const dx = endJoint.x - startJoint.x;
-  const dy = endJoint.y - startJoint.y;
-  const dz = endJoint.z - startJoint.z;
-  const safeDy = Math.max(Math.abs(dy), 0.001);
-  const roll = Math.atan2(dx, safeDy);
-  const pitch = Math.atan2(dz, safeDy);
-  return { pitch, roll };
+function limbAngles(startJoint: THREE.Vector3, endJoint: THREE.Vector3): { pitch: number; yaw: number; roll: number } {
+  // This helper converts a pair of joints into fuller 3-axis limb angles for a less rigid preview.
+  const direction = endJoint.clone().sub(startJoint);
+  const safeVertical = Math.max(Math.abs(direction.y), 0.001);
+  const horizontalDistance = Math.max(Math.hypot(direction.x, direction.z), 0.001);
+  const roll = Math.atan2(direction.x, safeVertical);
+  const pitch = Math.atan2(direction.z, safeVertical);
+  const yaw = Math.atan2(direction.x, horizontalDistance + Math.abs(direction.z) * 0.35);
+  return { pitch, yaw, roll };
+}
+
+function twistAngles(leftJoint: THREE.Vector3, rightJoint: THREE.Vector3): { yaw: number; roll: number } {
+  // This helper estimates torso and shoulder twist from left-right joint span.
+  const direction = rightJoint.clone().sub(leftJoint);
+  const safeWidth = Math.max(Math.abs(direction.x), 0.001);
+  const yaw = Math.atan2(direction.z, safeWidth);
+  const roll = Math.atan2(direction.y, safeWidth);
+  return { yaw, roll };
 }
 
 function setBoneRotation(
@@ -210,6 +258,24 @@ function setBoneRotation(
 
   const offsetQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, roll, "XYZ"));
   bone.quaternion.copy(baseQuaternion).multiply(offsetQuaternion);
+}
+
+function setBoneDirectionRotation(
+  bone: THREE.Bone | undefined,
+  baseQuaternion: THREE.Quaternion | undefined,
+  restDirection: THREE.Vector3 | undefined,
+  targetDirection: THREE.Vector3,
+  twist = 0,
+) {
+  // This helper aligns a bone to the target motion direction using rest-pose vectors for stronger spatial fidelity.
+  if (!bone || !baseQuaternion || !restDirection || targetDirection.lengthSq() < 0.000001) {
+    return;
+  }
+
+  const normalizedTarget = targetDirection.clone().normalize();
+  const directionOffset = new THREE.Quaternion().setFromUnitVectors(restDirection, normalizedTarget);
+  const twistOffset = new THREE.Quaternion().setFromAxisAngle(normalizedTarget, twist);
+  bone.quaternion.copy(baseQuaternion).multiply(directionOffset).multiply(twistOffset);
 }
 
 function findBoneByCandidates(root: THREE.Object3D, candidates: string[]): THREE.Bone | undefined {
@@ -236,15 +302,23 @@ function buildBoneMap(root: THREE.Object3D): BoneMap {
   return {
     hips: findBoneByCandidates(root, ["mixamorig:Hips", "Hips"]),
     spine: findBoneByCandidates(root, ["mixamorig:Spine", "Spine"]),
+    chest: findBoneByCandidates(root, ["mixamorig:Spine2", "mixamorig:Spine1", "Chest", "UpperChest"]),
+    neck: findBoneByCandidates(root, ["mixamorig:Neck", "Neck"]),
     head: findBoneByCandidates(root, ["mixamorig:Head", "Head"]),
+    leftShoulder: findBoneByCandidates(root, ["mixamorig:LeftShoulder", "LeftShoulder"]),
+    rightShoulder: findBoneByCandidates(root, ["mixamorig:RightShoulder", "RightShoulder"]),
     leftArm: findBoneByCandidates(root, ["mixamorig:LeftArm", "LeftArm"]),
     leftForeArm: findBoneByCandidates(root, ["mixamorig:LeftForeArm", "LeftForeArm"]),
+    leftHand: findBoneByCandidates(root, ["mixamorig:LeftHand", "LeftHand"]),
     rightArm: findBoneByCandidates(root, ["mixamorig:RightArm", "RightArm"]),
     rightForeArm: findBoneByCandidates(root, ["mixamorig:RightForeArm", "RightForeArm"]),
+    rightHand: findBoneByCandidates(root, ["mixamorig:RightHand", "RightHand"]),
     leftUpLeg: findBoneByCandidates(root, ["mixamorig:LeftUpLeg", "LeftUpLeg"]),
     leftLeg: findBoneByCandidates(root, ["mixamorig:LeftLeg", "LeftLeg"]),
+    leftFoot: findBoneByCandidates(root, ["mixamorig:LeftFoot", "LeftFoot"]),
     rightUpLeg: findBoneByCandidates(root, ["mixamorig:RightUpLeg", "RightUpLeg"]),
     rightLeg: findBoneByCandidates(root, ["mixamorig:RightLeg", "RightLeg"]),
+    rightFoot: findBoneByCandidates(root, ["mixamorig:RightFoot", "RightFoot"]),
   };
 }
 
@@ -261,16 +335,67 @@ function captureBonePoseMap(boneMap: BoneMap): BonePoseMap {
   // This helper snapshots the model bind pose so animation can be applied as conservative offsets.
   return {
     hipsPosition: boneMap.hips?.position.clone(),
+    hipsQuaternion: boneMap.hips?.quaternion.clone(),
     spineQuaternion: boneMap.spine?.quaternion.clone(),
+    chestQuaternion: boneMap.chest?.quaternion.clone(),
+    neckQuaternion: boneMap.neck?.quaternion.clone(),
     headQuaternion: boneMap.head?.quaternion.clone(),
+    leftShoulderQuaternion: boneMap.leftShoulder?.quaternion.clone(),
+    rightShoulderQuaternion: boneMap.rightShoulder?.quaternion.clone(),
     leftArmQuaternion: boneMap.leftArm?.quaternion.clone(),
     leftForeArmQuaternion: boneMap.leftForeArm?.quaternion.clone(),
+    leftHandQuaternion: boneMap.leftHand?.quaternion.clone(),
     rightArmQuaternion: boneMap.rightArm?.quaternion.clone(),
     rightForeArmQuaternion: boneMap.rightForeArm?.quaternion.clone(),
+    rightHandQuaternion: boneMap.rightHand?.quaternion.clone(),
     leftUpLegQuaternion: boneMap.leftUpLeg?.quaternion.clone(),
     leftLegQuaternion: boneMap.leftLeg?.quaternion.clone(),
+    leftFootQuaternion: boneMap.leftFoot?.quaternion.clone(),
     rightUpLegQuaternion: boneMap.rightUpLeg?.quaternion.clone(),
     rightLegQuaternion: boneMap.rightLeg?.quaternion.clone(),
+    rightFootQuaternion: boneMap.rightFoot?.quaternion.clone(),
+  };
+}
+
+function resolveChildBoneDirection(bone: THREE.Bone | undefined): THREE.Vector3 | undefined {
+  // This helper reads the rest-pose direction from a bone to its first child bone.
+  if (!bone) {
+    return undefined;
+  }
+
+  for (const child of bone.children) {
+    if (child instanceof THREE.Bone) {
+      const direction = child.position.clone();
+      if (direction.lengthSq() > 0.000001) {
+        return direction.normalize();
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function captureBoneRestMap(boneMap: BoneMap): BoneRestMap {
+  // This helper captures rest-pose bone directions for quaternion-based retargeting.
+  return {
+    spineDirection: resolveChildBoneDirection(boneMap.spine),
+    chestDirection: resolveChildBoneDirection(boneMap.chest),
+    neckDirection: resolveChildBoneDirection(boneMap.neck),
+    headDirection: resolveChildBoneDirection(boneMap.head),
+    leftShoulderDirection: resolveChildBoneDirection(boneMap.leftShoulder),
+    rightShoulderDirection: resolveChildBoneDirection(boneMap.rightShoulder),
+    leftArmDirection: resolveChildBoneDirection(boneMap.leftArm),
+    rightArmDirection: resolveChildBoneDirection(boneMap.rightArm),
+    leftForeArmDirection: resolveChildBoneDirection(boneMap.leftForeArm),
+    rightForeArmDirection: resolveChildBoneDirection(boneMap.rightForeArm),
+    leftHandDirection: resolveChildBoneDirection(boneMap.leftHand),
+    rightHandDirection: resolveChildBoneDirection(boneMap.rightHand),
+    leftUpLegDirection: resolveChildBoneDirection(boneMap.leftUpLeg),
+    rightUpLegDirection: resolveChildBoneDirection(boneMap.rightUpLeg),
+    leftLegDirection: resolveChildBoneDirection(boneMap.leftLeg),
+    rightLegDirection: resolveChildBoneDirection(boneMap.rightLeg),
+    leftFootDirection: resolveChildBoneDirection(boneMap.leftFoot),
+    rightFootDirection: resolveChildBoneDirection(boneMap.rightFoot),
   };
 }
 
@@ -312,12 +437,14 @@ function AnimatedAvatar({
   showSkin,
   showSkeleton,
   avatarVariant,
+  onFrameChange,
 }: {
   frames: PreviewFrame[];
   loopAnimation: boolean;
   showSkin: boolean;
   showSkeleton: boolean;
   avatarVariant: string;
+  onFrameChange?: (frame: PreviewFrame, frameIndex: number) => void;
 }) {
   // This component loads the FBX avatar, binds motion data to bones, and renders the rig.
   const sourceFbx = useFBX("/mixamo_model.fbx");
@@ -326,7 +453,9 @@ function AnimatedAvatar({
   const helperRef = useRef<THREE.SkeletonHelper | null>(null);
   const boneMapRef = useRef<BoneMap>({});
   const bonePoseMapRef = useRef<BonePoseMap>({});
+  const boneRestMapRef = useRef<BoneRestMap>({});
   const frameIndexRef = useRef(0);
+  const lastReportedFrameRef = useRef(-1);
 
   useEffect(() => {
     // This effect prepares the avatar transform and caches resolved rig bones.
@@ -339,6 +468,7 @@ function AnimatedAvatar({
     });
     boneMapRef.current = buildBoneMap(clonedScene);
     bonePoseMapRef.current = captureBonePoseMap(boneMapRef.current);
+    boneRestMapRef.current = captureBoneRestMap(boneMapRef.current);
     setSkinnedMeshVisibility(clonedScene, showSkin);
 
     if (helperRef.current) {
@@ -390,9 +520,12 @@ function AnimatedAvatar({
     const joints = activeFrame.joints;
     const boneMap = boneMapRef.current;
     const bonePoseMap = bonePoseMapRef.current;
+    const boneRestMap = boneRestMapRef.current;
 
     const hips = toVector3(joints.hips);
+    const spine = toVector3(joints.spine);
     const neck = toVector3(joints.neck);
+    const chest = toVector3(joints.chest);
     const head = toVector3(joints.head);
     const leftShoulder = toVector3(joints.left_shoulder);
     const leftElbow = toVector3(joints.left_elbow);
@@ -402,66 +535,143 @@ function AnimatedAvatar({
     const rightHand = toVector3(joints.right_hand);
     const leftKnee = toVector3(joints.left_knee);
     const leftFoot = toVector3(joints.left_foot);
+    const leftToe = toVector3(joints.left_toe);
     const rightKnee = toVector3(joints.right_knee);
     const rightFoot = toVector3(joints.right_foot);
+    const rightToe = toVector3(joints.right_toe);
 
-    const torsoAngles = limbAngles(hips, neck);
-    const headAngles = limbAngles(neck, head);
-    const leftArmAngles = limbAngles(leftShoulder, leftElbow);
-    const leftForeArmAngles = limbAngles(leftElbow, leftHand);
-    const rightArmAngles = limbAngles(rightShoulder, rightElbow);
-    const rightForeArmAngles = limbAngles(rightElbow, rightHand);
-    const leftLegAngles = limbAngles(hips, leftKnee);
-    const leftShinAngles = limbAngles(leftKnee, leftFoot);
-    const rightLegAngles = limbAngles(hips, rightKnee);
-    const rightShinAngles = limbAngles(rightKnee, rightFoot);
+    const shoulderTwist = twistAngles(leftShoulder, rightShoulder);
+    const hipTwist = twistAngles(leftKnee, rightKnee);
 
     if (boneMap.hips) {
       boneMap.hips.position.copy(bonePoseMap.hipsPosition ?? boneMap.hips.position);
-      boneMap.hips.position.x += hips.x * 0.01;
+      boneMap.hips.position.x += hips.x * 0.04;
+      boneMap.hips.position.y += (hips.y - 0.7) * 0.03;
+      boneMap.hips.position.z += hips.z * 0.05;
     }
 
-    setBoneRotation(boneMap.spine, bonePoseMap.spineQuaternion, torsoAngles.pitch * 0.7, 0, -torsoAngles.roll * 0.5);
-    setBoneRotation(boneMap.head, bonePoseMap.headQuaternion, headAngles.pitch * 0.6, 0, -headAngles.roll * 0.4);
+    setBoneDirectionRotation(
+      boneMap.spine,
+      bonePoseMap.spineQuaternion,
+      boneRestMap.spineDirection,
+      spine.clone().sub(hips),
+      shoulderTwist.yaw * 0.35,
+    );
+    setBoneDirectionRotation(
+      boneMap.chest,
+      bonePoseMap.chestQuaternion,
+      boneRestMap.chestDirection,
+      chest.clone().sub(spine),
+      shoulderTwist.yaw * 0.45,
+    );
+    setBoneDirectionRotation(
+      boneMap.neck,
+      bonePoseMap.neckQuaternion,
+      boneRestMap.neckDirection,
+      neck.clone().sub(chest),
+      shoulderTwist.yaw * 0.25,
+    );
+    setBoneDirectionRotation(
+      boneMap.head,
+      bonePoseMap.headQuaternion,
+      boneRestMap.headDirection,
+      head.clone().sub(neck),
+      shoulderTwist.yaw * 0.18,
+    );
 
-    setBoneRotation(boneMap.leftArm, bonePoseMap.leftArmQuaternion, leftArmAngles.pitch, 0, -leftArmAngles.roll);
-    setBoneRotation(
+    setBoneDirectionRotation(
+      boneMap.leftShoulder,
+      bonePoseMap.leftShoulderQuaternion,
+      boneRestMap.leftShoulderDirection,
+      leftShoulder.clone().sub(chest),
+    );
+    setBoneDirectionRotation(
+      boneMap.leftArm,
+      bonePoseMap.leftArmQuaternion,
+      boneRestMap.leftArmDirection,
+      leftElbow.clone().sub(leftShoulder),
+    );
+    setBoneDirectionRotation(
       boneMap.leftForeArm,
       bonePoseMap.leftForeArmQuaternion,
-      leftForeArmAngles.pitch,
-      0,
-      -leftForeArmAngles.roll,
+      boneRestMap.leftForeArmDirection,
+      leftHand.clone().sub(leftElbow),
     );
-    setBoneRotation(boneMap.rightArm, bonePoseMap.rightArmQuaternion, rightArmAngles.pitch, 0, -rightArmAngles.roll);
-    setBoneRotation(
+    setBoneDirectionRotation(
+      boneMap.leftHand,
+      bonePoseMap.leftHandQuaternion,
+      boneRestMap.leftHandDirection,
+      leftHand.clone().sub(leftElbow),
+    );
+    setBoneDirectionRotation(
+      boneMap.rightShoulder,
+      bonePoseMap.rightShoulderQuaternion,
+      boneRestMap.rightShoulderDirection,
+      rightShoulder.clone().sub(chest),
+    );
+    setBoneDirectionRotation(
+      boneMap.rightArm,
+      bonePoseMap.rightArmQuaternion,
+      boneRestMap.rightArmDirection,
+      rightElbow.clone().sub(rightShoulder),
+    );
+    setBoneDirectionRotation(
       boneMap.rightForeArm,
       bonePoseMap.rightForeArmQuaternion,
-      rightForeArmAngles.pitch,
-      0,
-      -rightForeArmAngles.roll,
+      boneRestMap.rightForeArmDirection,
+      rightHand.clone().sub(rightElbow),
+    );
+    setBoneDirectionRotation(
+      boneMap.rightHand,
+      bonePoseMap.rightHandQuaternion,
+      boneRestMap.rightHandDirection,
+      rightHand.clone().sub(rightElbow),
     );
 
-    setBoneRotation(boneMap.leftLeg, bonePoseMap.leftLegQuaternion, leftShinAngles.pitch, 0, -leftShinAngles.roll * 0.25);
     setBoneRotation(
-      boneMap.rightLeg,
-      bonePoseMap.rightLegQuaternion,
-      rightShinAngles.pitch,
+      boneMap.hips,
+      bonePoseMap.hipsQuaternion,
       0,
-      -rightShinAngles.roll * 0.25,
+      hipTwist.yaw * 0.35,
+      0,
     );
-    setBoneRotation(
+    setBoneDirectionRotation(
       boneMap.leftUpLeg,
       bonePoseMap.leftUpLegQuaternion,
-      leftLegAngles.pitch * 0.35,
-      0,
-      -leftLegAngles.roll * 0.15,
+      boneRestMap.leftUpLegDirection,
+      leftKnee.clone().sub(hips),
+      hipTwist.yaw * 0.08,
     );
-    setBoneRotation(
+    setBoneDirectionRotation(
+      boneMap.leftLeg,
+      bonePoseMap.leftLegQuaternion,
+      boneRestMap.leftLegDirection,
+      leftFoot.clone().sub(leftKnee),
+    );
+    setBoneDirectionRotation(
+      boneMap.leftFoot,
+      bonePoseMap.leftFootQuaternion,
+      boneRestMap.leftFootDirection,
+      leftToe.clone().sub(leftFoot),
+    );
+    setBoneDirectionRotation(
       boneMap.rightUpLeg,
       bonePoseMap.rightUpLegQuaternion,
-      rightLegAngles.pitch * 0.35,
-      0,
-      -rightLegAngles.roll * 0.15,
+      boneRestMap.rightUpLegDirection,
+      rightKnee.clone().sub(hips),
+      hipTwist.yaw * 0.08,
+    );
+    setBoneDirectionRotation(
+      boneMap.rightLeg,
+      bonePoseMap.rightLegQuaternion,
+      boneRestMap.rightLegDirection,
+      rightFoot.clone().sub(rightKnee),
+    );
+    setBoneDirectionRotation(
+      boneMap.rightFoot,
+      bonePoseMap.rightFootQuaternion,
+      boneRestMap.rightFootDirection,
+      rightToe.clone().sub(rightFoot),
     );
 
     if (groupRef.current) {
@@ -470,6 +680,11 @@ function AnimatedAvatar({
 
     if (helperRef.current) {
       helperRef.current.visible = showSkeleton;
+    }
+
+    if (onFrameChange && lastReportedFrameRef.current !== nextFrameIndex) {
+      lastReportedFrameRef.current = nextFrameIndex;
+      onFrameChange(activeFrame, nextFrameIndex);
     }
   });
 
@@ -487,6 +702,7 @@ export default function AvatarPreview({
   environmentPreset,
   lightingPreset,
   avatarVariant,
+  onFrameChange,
 }: AvatarPreviewProps) {
   // This component assembles the canvas, preview controls, and animated timeline.
   const [showSkin, setShowSkin] = useState(true);
@@ -494,32 +710,10 @@ export default function AvatarPreview({
   const environmentStyle = ENVIRONMENT_STYLES[environmentPreset] ?? ENVIRONMENT_STYLES["Neon Stage"];
   const lightingStyle = LIGHTING_STYLES[lightingPreset] ?? LIGHTING_STYLES.Halo;
 
-  const safeFrames =
-    frames.length > 0
-      ? frames
-      : [
-          {
-            t: 0,
-            joints: {
-              head: { x: 0, y: 2.4, z: 0 },
-              neck: { x: 0, y: 1.8, z: 0 },
-              left_shoulder: { x: -0.6, y: 1.7, z: 0 },
-              right_shoulder: { x: 0.6, y: 1.7, z: 0 },
-              left_elbow: { x: -0.9, y: 1.1, z: 0 },
-              right_elbow: { x: 0.9, y: 1.1, z: 0 },
-              left_hand: { x: -1.1, y: 0.7, z: 0 },
-              right_hand: { x: 1.1, y: 0.7, z: 0 },
-              hips: { x: 0, y: 0.7, z: 0 },
-              left_knee: { x: -0.35, y: -0.45, z: 0 },
-              right_knee: { x: 0.35, y: -0.45, z: 0 },
-              left_foot: { x: -0.45, y: -1.45, z: 0 },
-              right_foot: { x: 0.45, y: -1.45, z: 0 },
-            },
-          },
-        ];
+  const safeFrames = frames;
 
   return (
-    <div className={`flex h-full flex-col rounded-[28px] border border-white/10 ${environmentStyle.backgroundClassName}`}>
+    <div className={`flex flex-col rounded-[28px] border border-white/10 ${environmentStyle.backgroundClassName}`}>
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
         <div className="text-xs uppercase tracking-[0.22em] text-white/45">Avatar Preview Controls</div>
         <div className="flex gap-2">
@@ -563,6 +757,7 @@ export default function AvatarPreview({
             showSkin={showSkin}
             showSkeleton={showSkeleton}
             avatarVariant={avatarVariant}
+            onFrameChange={onFrameChange}
           />
 
           <Sparkles
