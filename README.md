@@ -8,11 +8,7 @@ Web AI Humanoid Animator - Turn any video into a reusable humanoid FBX animation
 
 ![Project Screenshot](doc/screenshot-4.png)
 
-
-Test the model file - To preview the downloaded `.fbx` animation file online, use:
-
-* Meshy FBX Viewer: [https://www.meshy.ai/3d-tools/online-viewer/fbx](https://www.meshy.ai/3d-tools/online-viewer/fbx)
-* Tripo AI FBX Viewer: [https://www.tripo3d.ai/3d-tools/3d-viewer/fbx](https://www.tripo3d.ai/3d-tools/3d-viewer/fbx)
+---
 
 ## Team
 
