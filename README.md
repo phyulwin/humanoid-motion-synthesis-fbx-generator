@@ -28,7 +28,15 @@ AI Humanoid Animator allows users to upload a short dance or movement video thro
 
 ## Accomplishments that we're proud of
 
+Built a working project that turns a short dance video into a moving 3D avatar and exports it as an FBX animation file. Created a strong MVP that clearly shows how the product helps creators save time by generating animations automatically instead of animating by hand. Successfully combined AI pose detection, K2 Think V2 reasoning, live browser preview, and Blender FBX export into one complete workflow.
+
 ## What we learned
+
+* Keeping scope small is important
+* FBX export is harder than it looks
+* Retargeting motion is the hardest part
+* Real pose tracking is better than fallback motion
+* Small backend bugs can break the whole pipeline
 
 ## What's next for AI Humanoid Animator
 

@@ -18,6 +18,8 @@ class MotionReasoningResult:
     arm_boost: float
     leg_boost: float
     hip_sway_boost: float
+    shoulder_sway_boost: float
+    head_bounce_boost: float
     smoothing_window: int
     confidence: str
     raw_response: str
@@ -75,7 +77,7 @@ class K2ReasoningClient:
         instructions = (
             "You are reviewing dance motion data for humanoid FBX export. "
             "Return strict JSON only. "
-            "Decide how to improve readability of arms, legs, torso sway, and temporal smoothness. "
+            "Decide how to improve readability of arms, legs, torso sway, shoulder sway, head bounce, and temporal smoothness. "
             "Do not invent new joints. "
             "JSON schema: "
             "{\"summary\": string, "
@@ -83,6 +85,8 @@ class K2ReasoningClient:
             "\"arm_boost\": number between 0.8 and 1.8, "
             "\"leg_boost\": number between 0.8 and 1.6, "
             "\"hip_sway_boost\": number between 0.8 and 1.8, "
+            "\"shoulder_sway_boost\": number between 0.8 and 1.8, "
+            "\"head_bounce_boost\": number between 0.8 and 1.6, "
             "\"smoothing_window\": integer between 1 and 7, "
             "\"confidence\": \"low\"|\"medium\"|\"high\"}."
         )
@@ -90,6 +94,8 @@ class K2ReasoningClient:
         return {
             "model": self.settings.k2_model_name,
             "stream": False,
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
@@ -121,8 +127,11 @@ class K2ReasoningClient:
         choices = response_json.get("choices", [])
         if not choices:
             raise ValueError("K2 response did not contain any choices.")
-        message = choices[0].get("message", {})
+        selected_choice = choices[0]
+        message = selected_choice.get("message", {})
         content = message.get("content", "")
+        if not content and isinstance(selected_choice.get("text"), str):
+            content = selected_choice.get("text", "")
         if isinstance(content, list):
             combined_parts = []
             for item in content:
@@ -140,12 +149,22 @@ class K2ReasoningClient:
             lines = normalized_content.splitlines()
             normalized_content = "\n".join(line for line in lines if not line.startswith("```")).strip()
 
-        response_payload = json.loads(normalized_content)
+        try:
+            response_payload = json.loads(normalized_content)
+        except json.JSONDecodeError:
+            json_start = normalized_content.find("{")
+            json_end = normalized_content.rfind("}")
+            if json_start < 0 or json_end < json_start:
+                raise ValueError(f"K2 response was not valid JSON: {normalized_content[:240]}")
+            response_payload = json.loads(normalized_content[json_start : json_end + 1])
+
         summary = str(response_payload.get("summary", "K2 reasoning completed."))
         actions = [str(item) for item in response_payload.get("actions", [])]
         arm_boost = self._clamp_float(response_payload.get("arm_boost", 1.15), 0.8, 1.8)
         leg_boost = self._clamp_float(response_payload.get("leg_boost", 1.08), 0.8, 1.6)
         hip_sway_boost = self._clamp_float(response_payload.get("hip_sway_boost", 1.12), 0.8, 1.8)
+        shoulder_sway_boost = self._clamp_float(response_payload.get("shoulder_sway_boost", 1.08), 0.8, 1.8)
+        head_bounce_boost = self._clamp_float(response_payload.get("head_bounce_boost", 1.04), 0.8, 1.6)
         smoothing_window = self._clamp_int(response_payload.get("smoothing_window", 3), 1, 7)
         confidence = str(response_payload.get("confidence", "medium"))
 
@@ -155,6 +174,8 @@ class K2ReasoningClient:
             arm_boost=arm_boost,
             leg_boost=leg_boost,
             hip_sway_boost=hip_sway_boost,
+            shoulder_sway_boost=shoulder_sway_boost,
+            head_bounce_boost=head_bounce_boost,
             smoothing_window=smoothing_window,
             confidence=confidence,
             raw_response=content,

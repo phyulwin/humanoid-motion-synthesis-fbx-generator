@@ -52,14 +52,14 @@ class MotionPipeline:
                 message="Extracting pose landmarks from motion clip.",
             )
             thumbnail_url = self._extract_thumbnail(job.id, normalized_path)
-            preview_frames = self._extract_pose_preview(job, normalized_path)
+            preview_frames, extraction_status = self._extract_pose_preview(job, normalized_path)
 
             self.store.update_job(
                 job_id,
                 progress=65,
                 message="Running K2 reasoning and building review-ready motion preview.",
             )
-            reasoning_result = self._run_reasoning(preview_frames, job.settings.frame_rate)
+            reasoning_result, reasoning_status = self._run_reasoning(preview_frames, job.settings.frame_rate)
             preview_frames = self._apply_reasoning_cleanup(preview_frames, reasoning_result)
             waveform = self._build_waveform(preview_frames)
             motion_payload = {
@@ -78,8 +78,8 @@ class MotionPipeline:
                 thumbnail_url=thumbnail_url,
                 preview_frames=preview_frames,
                 waveform=waveform,
-                reasoning_summary=reasoning_result.summary if reasoning_result else "K2 reasoning skipped.",
-                reasoning_actions=reasoning_result.actions if reasoning_result else [],
+                reasoning_summary=reasoning_result.summary if reasoning_result else reasoning_status,
+                reasoning_actions=(reasoning_result.actions if reasoning_result else []) + [extraction_status],
                 reasoning_model=self.settings.k2_model_name if reasoning_result else None,
             )
         except Exception as exc:
@@ -151,7 +151,7 @@ class MotionPipeline:
         except Exception:
             return None
 
-    def _extract_pose_preview(self, job: JobRecord, video_path: Path) -> list[PreviewFrame]:
+    def _extract_pose_preview(self, job: JobRecord, video_path: Path) -> tuple[list[PreviewFrame], str]:
         # This helper builds preview frames from MediaPipe when possible and falls back to synthetic motion otherwise.
         try:
             import cv2
@@ -164,7 +164,7 @@ class MotionPipeline:
             stride = max(1, total_frames // max_frames) if total_frames else 2
             pose = mp.solutions.pose.Pose(
                 static_image_mode=False,
-                model_complexity=1,
+                model_complexity=2,
                 smooth_landmarks=True,
                 enable_segmentation=False,
             )
@@ -181,8 +181,16 @@ class MotionPipeline:
 
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 result = pose.process(rgb_frame)
-                if result.pose_landmarks:
-                    normalized = self._normalize_landmarks(result.pose_landmarks.landmark)
+                if result.pose_world_landmarks:
+                    normalized = self._normalize_landmarks(result.pose_world_landmarks.landmark, use_world_space=True)
+                    extracted_frames.append(
+                        PreviewFrame(
+                            t=round(frame_index / max(fps, 1.0), 4),
+                            joints=normalized,
+                        )
+                    )
+                elif result.pose_landmarks:
+                    normalized = self._normalize_landmarks(result.pose_landmarks.landmark, use_world_space=False)
                     extracted_frames.append(
                         PreviewFrame(
                             t=round(frame_index / max(fps, 1.0), 4),
@@ -197,13 +205,16 @@ class MotionPipeline:
             pose.close()
 
             if extracted_frames:
-                return extracted_frames
+                return extracted_frames, "Pose source: MediaPipe extraction."
         except Exception:
             pass
 
-        return self._generate_fallback_motion(job.settings.frame_rate, job.settings.trim_start, job.settings.trim_end)
+        return (
+            self._generate_fallback_motion(job.settings.frame_rate, job.settings.trim_start, job.settings.trim_end),
+            "Pose source: synthetic fallback motion.",
+        )
 
-    def _normalize_landmarks(self, landmarks) -> dict[str, JointPoint]:
+    def _normalize_landmarks(self, landmarks, use_world_space: bool) -> dict[str, JointPoint]:
         # This helper converts MediaPipe landmarks into a smaller normalized humanoid joint set.
         def point(index: int) -> np.ndarray:
             selected = landmarks[index]
@@ -238,9 +249,12 @@ class MotionPipeline:
         normalized: dict[str, JointPoint] = {}
         for name, coordinates in joint_lookup.items():
             centered = (coordinates - hips) / scale
+            y_value = float(centered[1] * 2.4)
+            if not use_world_space:
+                y_value = -y_value
             normalized[name] = JointPoint(
                 x=round(float(centered[0] * 2.4), 4),
-                y=round(float(-centered[1] * 2.4), 4),
+                y=round(y_value, 4),
                 z=round(float(centered[2] * 2.4), 4),
             )
         return normalized
@@ -278,12 +292,22 @@ class MotionPipeline:
             )
         return preview_frames
 
-    def _run_reasoning(self, preview_frames: list[PreviewFrame], frame_rate: int) -> MotionReasoningResult | None:
+    def _run_reasoning(
+        self,
+        preview_frames: list[PreviewFrame],
+        frame_rate: int,
+    ) -> tuple[MotionReasoningResult | None, str]:
         # This helper asks K2 for cleanup policy and falls back quietly if the API is unavailable.
+        if not self.k2_client.is_enabled():
+            return None, "K2 Think V2 skipped: missing API key or disabled configuration."
+
         try:
-            return self.k2_client.analyze_motion(preview_frames, frame_rate)
-        except Exception:
-            return None
+            reasoning_result = self.k2_client.analyze_motion(preview_frames, frame_rate)
+            if reasoning_result is None:
+                return None, "K2 Think V2 skipped: no reasoning result returned."
+            return reasoning_result, "K2 Think V2 completed."
+        except Exception as exc:
+            return None, f"K2 Think V2 failed: {exc}"
 
     def _apply_reasoning_cleanup(
         self,
@@ -297,6 +321,8 @@ class MotionPipeline:
         arm_boost = reasoning_result.arm_boost if reasoning_result else 1.18
         leg_boost = reasoning_result.leg_boost if reasoning_result else 1.08
         hip_sway_boost = reasoning_result.hip_sway_boost if reasoning_result else 1.1
+        shoulder_sway_boost = reasoning_result.shoulder_sway_boost if reasoning_result else 1.08
+        head_bounce_boost = reasoning_result.head_bounce_boost if reasoning_result else 1.04
         smoothing_window = reasoning_result.smoothing_window if reasoning_result else 3
 
         enhanced_frames: list[PreviewFrame] = []
@@ -311,12 +337,20 @@ class MotionPipeline:
                     x_value *= arm_boost
                     z_value *= arm_boost
 
+                if joint_name in {"left_shoulder", "right_shoulder"}:
+                    x_value *= shoulder_sway_boost
+                    z_value *= shoulder_sway_boost
+
                 if joint_name in {"left_foot", "right_foot", "left_knee", "right_knee"}:
                     x_value *= leg_boost
                     z_value *= leg_boost
 
                 if joint_name == "hips":
                     x_value *= hip_sway_boost
+
+                if joint_name == "head":
+                    y_value *= head_bounce_boost
+                    z_value *= head_bounce_boost
 
                 updated_joints[joint_name] = JointPoint(
                     x=round(x_value, 4),
