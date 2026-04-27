@@ -12,7 +12,7 @@ Web AI Humanoid Animator - Turn any video into a reusable humanoid FBX animation
 
 ## Team
 
-- Kelly Lwin (klwin@cpp.edu)
+- Kelly Lwin
 
 ## Inspiration
 
@@ -50,7 +50,7 @@ Built a reliable hackathon MVP that maps curated sample videos to matching pre-m
 * Real pose tracking is better than fallback motion
 * Small backend bugs can break the whole pipeline
 
-## What's next for K2 Think V2
+## What's next for Kinetic X Studio
 
 * Cloud storage and animation showcase gallery for managing saved FBX exports
 * FBX sharing, collaboration, and reusable animation library support
