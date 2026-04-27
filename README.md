@@ -6,7 +6,7 @@ Web AI Humanoid Animator - Turn any video into a reusable humanoid FBX animation
 - Project Credits: [CREDIT.md](https://github.com/phyulwin/humanoid-motion-synthesis-fbx-generator/blob/main/CREDIT.md)
 
 
-![Project Screenshot](doc/screenshot-4.png)
+![Project Screenshot](doc/screenshot-6.png)
 
 ---
 
@@ -21,6 +21,8 @@ I do game development and Blender modeling as a hobby, but creating character an
 ## What it does
 
 Kinetic X Studio allows users to upload a short dance or movement video through a simple web application. The system analyzes the human motion, extracts body pose data, and converts it into a humanoid animation sequence. It then retargets that motion onto a standardized rig and exports it as a reusable FBX animation file compatible with Blender, Unity, and Unreal Engine. This helps creators, VTubers, and indie game developers generate custom animations faster without manual keyframing or expensive motion capture.
+
+![Project Screenshot](doc/screenshot-5.png)
 
 ## How we built it
 
@@ -41,6 +43,8 @@ Built the frontend with Next.js, React, Tailwind CSS, and React Three Fiber to h
 ## Accomplishments that we're proud of
 
 Built a reliable hackathon MVP that maps curated sample videos to matching pre-made Mixamo animations and previews them on a 3D avatar. Integrated K2 Think V2 as a reasoning layer that summarizes the uploaded motion context and supports the demo narrative with intelligible motion labels. Delivered an end-to-end workflow with video upload, matched animation preview, controlled playback, and Blender-based FBX export in one operational pipeline.
+
+![Project Screenshot](doc/screenshot-4.png)
 
 ## What we learned
 
